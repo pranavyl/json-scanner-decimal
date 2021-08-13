@@ -20,6 +20,7 @@
 #include "exec/base-sequence-scanner.h"
 #include "exec/hdfs-columnar-scanner.h"
 #include "exec/hdfs-scan-node-mt.h"
+#include "exec/hdfs-json-scanner.h"
 #include "exec/hdfs-scan-node.h"
 #include "exec/avro/hdfs-avro-scanner.h"
 #include "exec/orc/hdfs-orc-scanner.h"
@@ -66,8 +67,8 @@ DECLARE_bool(skip_file_runtime_filtering);
 #endif
 
 DEFINE_bool(always_use_data_cache, false, "(Advanced) Always uses the IO data cache "
-    "for all reads, regardless of whether the read is local or remote. By default, the "
-    "IO data cache is only used if the data is expected to be remote. Used by tests.");
+                                          "for all reads, regardless of whether the read is local or remote. By default, the "
+                                          "IO data cache is only used if the data is expected to be remote. Used by tests.");
 
 namespace filesystem = boost::filesystem;
 using namespace impala::io;
@@ -75,36 +76,36 @@ using namespace strings;
 
 namespace impala {
 PROFILE_DEFINE_TIMER(TotalRawHdfsReadTime, STABLE_LOW, "Aggregate wall clock time"
-    " across all Disk I/O threads in HDFS read operations.");
+                                                       " across all Disk I/O threads in HDFS read operations.");
 PROFILE_DEFINE_TIMER(TotalRawHdfsOpenFileTime, STABLE_LOW, "Aggregate wall clock time"
-    " spent across all Disk I/O threads in HDFS open operations.");
+                                                           " spent across all Disk I/O threads in HDFS open operations.");
 PROFILE_DEFINE_DERIVED_COUNTER(PerReadThreadRawHdfsThroughput, STABLE_LOW,
     TUnit::BYTES_PER_SECOND, "The read throughput in bytes/sec for each HDFS read thread"
-    " while it is executing I/O operations on behalf of a scan.");
+                             " while it is executing I/O operations on behalf of a scan.");
 PROFILE_DEFINE_COUNTER(ScanRangesComplete, STABLE_LOW, TUnit::UNIT,
     "Number of scan ranges that have been completed by a scan node.");
 PROFILE_DEFINE_COUNTER(CollectionItemsRead, STABLE_LOW, TUnit::UNIT,
     "Total number of nested collection items read by the scan. Only created for scans "
     "(e.g. Parquet) that support nested types.");
 PROFILE_DEFINE_COUNTER(NumDisksAccessed, STABLE_LOW, TUnit::UNIT, "Number of distinct "
-     "disks accessed by HDFS scan. Each local disk is counted as a disk and each type of"
-     " remote filesystem (e.g. HDFS remote reads, S3) is counted as a distinct disk.");
+                                                                  "disks accessed by HDFS scan. Each local disk is counted as a disk and each type of"
+                                                                  " remote filesystem (e.g. HDFS remote reads, S3) is counted as a distinct disk.");
 PROFILE_DEFINE_SAMPLING_COUNTER(AverageHdfsReadThreadConcurrency, STABLE_LOW, "The"
-     " average number of HDFS read threads executing read operations on behalf of this "
-     "scan. Higher values (i.e. close to the aggregate number of I/O threads across "
-     "all disks accessed) show that this scan is using a larger proportion of the I/O "
-     "capacity of the system. Lower values show that either this scan is not I/O bound"
-     " or that it is getting a small share of the I/O capacity of the system.");
+                                                                              " average number of HDFS read threads executing read operations on behalf of this "
+                                                                              "scan. Higher values (i.e. close to the aggregate number of I/O threads across "
+                                                                              "all disks accessed) show that this scan is using a larger proportion of the I/O "
+                                                                              "capacity of the system. Lower values show that either this scan is not I/O bound"
+                                                                              " or that it is getting a small share of the I/O capacity of the system.");
 PROFILE_DEFINE_SUMMARY_STATS_COUNTER(InitialRangeIdealReservation, DEBUG, TUnit::BYTES,
-     "Tracks stats about the ideal reservation for initial scan ranges. Use this to "
-     "determine if the scan got all of the reservation it wanted. Does not include "
-     "subsequent reservation increases done by scanner implementation (e.g. for Parquet "
-     "columns).");
+    "Tracks stats about the ideal reservation for initial scan ranges. Use this to "
+    "determine if the scan got all of the reservation it wanted. Does not include "
+    "subsequent reservation increases done by scanner implementation (e.g. for Parquet "
+    "columns).");
 PROFILE_DEFINE_SUMMARY_STATS_COUNTER(InitialRangeActualReservation, DEBUG,
     TUnit::BYTES, "Tracks stats about the actual reservation for initial scan ranges. "
-    "Use this to determine if the scan got all of the reservation it wanted. Does not "
-    "include subsequent reservation increases done by scanner implementation "
-    "(e.g. for Parquet columns).");
+                  "Use this to determine if the scan got all of the reservation it wanted. Does not "
+                  "include subsequent reservation increases done by scanner implementation "
+                  "(e.g. for Parquet columns).");
 PROFILE_DEFINE_COUNTER(BytesReadLocal, STABLE_LOW, TUnit::BYTES,
     "The total number of bytes read locally");
 PROFILE_DEFINE_COUNTER(BytesReadShortCircuit, STABLE_LOW, TUnit::BYTES,
@@ -123,22 +124,22 @@ PROFILE_DEFINE_COUNTER(CachedFileHandlesMissCount, STABLE_LOW, TUnit::UNIT,
     "Total number of file handle opens where the file handle was not in the cache");
 PROFILE_DEFINE_HIGH_WATER_MARK_COUNTER(MaxCompressedTextFileLength, STABLE_LOW,
     TUnit::BYTES, "The size of the largest compressed text file to be scanned. "
-    "This is used to estimate scanner thread memory usage.");
+                  "This is used to estimate scanner thread memory usage.");
 PROFILE_DEFINE_TIMER(ScannerIoWaitTime, STABLE_LOW, "Total amount of time scanner "
-    "threads spent waiting for I/O. This value can be compared to the value of "
-    "ScannerThreadsTotalWallClockTime of MT_DOP = 0 scan nodes or otherwise compared "
-    "to the total time reported for MT_DOP > 0 scan nodes. High values show that "
-    "scanner threads are spending significant time waiting for I/O instead of "
-    "processing data. Note that this includes the time when the thread is runnable "
-    "but not scheduled.");
+                                                    "threads spent waiting for I/O. This value can be compared to the value of "
+                                                    "ScannerThreadsTotalWallClockTime of MT_DOP = 0 scan nodes or otherwise compared "
+                                                    "to the total time reported for MT_DOP > 0 scan nodes. High values show that "
+                                                    "scanner threads are spending significant time waiting for I/O instead of "
+                                                    "processing data. Note that this includes the time when the thread is runnable "
+                                                    "but not scheduled.");
 PROFILE_DEFINE_SUMMARY_STATS_COUNTER(ParquetUncompressedBytesReadPerColumn, STABLE_LOW,
     TUnit::BYTES, "Stats about the number of uncompressed bytes read per column. "
-    "Each sample in the counter is the size of a single column that is scanned by the "
-    "scan node.");
+                  "Each sample in the counter is the size of a single column that is scanned by the "
+                  "scan node.");
 PROFILE_DEFINE_SUMMARY_STATS_COUNTER(ParquetCompressedBytesReadPerColumn, STABLE_LOW,
     TUnit::BYTES, "Stats about the number of compressed bytes read per column. "
-    "Each sample in the counter is the size of a single column that is scanned by the "
-    "scan node.");
+                  "Each sample in the counter is the size of a single column that is scanned by the "
+                  "scan node.");
 PROFILE_DEFINE_COUNTER(DataCacheHitCount, STABLE_HIGH, TUnit::UNIT,
     "Total count of data cache hit");
 PROFILE_DEFINE_COUNTER(DataCachePartialHitCount, STABLE_HIGH, TUnit::UNIT,
@@ -481,8 +482,8 @@ Status HdfsScanNodeBase::Prepare(RuntimeState* state) {
   if (scan_range_params_->size() > 0
       && resource_profile_.min_reservation < min_buffer_size) {
     return Status(TErrorCode::INTERNAL_ERROR,
-      Substitute("HDFS scan min reservation $0 must be >= min buffer size $1",
-       resource_profile_.min_reservation, min_buffer_size));
+        Substitute("HDFS scan min reservation $0 must be >= min buffer size $1",
+            resource_profile_.min_reservation, min_buffer_size));
   }
 
   // One-time initialization of state that is constant across scan ranges
@@ -561,8 +562,8 @@ Status HdfsScanNodeBase::Open(RuntimeState* state) {
       PROFILE_TotalRawHdfsOpenFileTime.Instantiate(runtime_profile());
   per_read_thread_throughput_counter_ =
       PROFILE_PerReadThreadRawHdfsThroughput.Instantiate(runtime_profile(),
-      bind<int64_t>(&RuntimeProfile::UnitsPerSecond, bytes_read_counter_,
-      hdfs_read_timer_));
+          bind<int64_t>(&RuntimeProfile::UnitsPerSecond, bytes_read_counter_,
+              hdfs_read_timer_));
   scan_ranges_complete_counter_ =
       PROFILE_ScanRangesComplete.Instantiate(runtime_profile());
   collection_items_read_counter_ =
@@ -594,7 +595,7 @@ Status HdfsScanNodeBase::Open(RuntimeState* state) {
 
   average_hdfs_read_thread_concurrency_ =
       PROFILE_AverageHdfsReadThreadConcurrency.Instantiate(runtime_profile(),
-      &active_hdfs_read_thread_counter_);
+          &active_hdfs_read_thread_counter_);
 
   initial_range_ideal_reservation_stats_ =
       PROFILE_InitialRangeIdealReservation.Instantiate(runtime_profile());
@@ -672,7 +673,7 @@ Status HdfsScanNodeBase::IssueInitialScanRanges(RuntimeState* state) {
   initial_ranges_issued_.Store(true);
   // We want to decrement this remaining_scan_range_submissions in all cases.
   auto remaining_scan_range_submissions_trigger =
-    MakeScopeExitTrigger([&](){ UpdateRemainingScanRangeSubmissions(-1); });
+      MakeScopeExitTrigger([&](){ UpdateRemainingScanRangeSubmissions(-1); });
 
   // No need to issue ranges with limit 0.
   if (ReachedLimitShared()) {
@@ -721,6 +722,9 @@ Status HdfsScanNodeBase::IssueInitialScanRanges(RuntimeState* state) {
       case THdfsFileFormat::ORC:
         RETURN_IF_ERROR(HdfsOrcScanner::IssueInitialRanges(this, entry.second));
         break;
+      case THdfsFileFormat::JSON:
+        RETURN_IF_ERROR(HdfsJsonScanner::IssueInitialRanges(this, entry.second));
+        break;
       default:
         DCHECK(false) << "Unexpected file type " << entry.first;
     }
@@ -740,10 +744,10 @@ bool HdfsScanNodeBase::FilePassesFilterPredicates(RuntimeState* state, HdfsFileD
   ScanRangeMetadata* metadata =
       static_cast<ScanRangeMetadata*>(file->splits[0]->meta_data());
   if (!PartitionPassesFilters(metadata->partition_id, FilterStats::FILES_KEY,
-      filter_ctxs)) {
+          filter_ctxs)) {
     return false;
   } else if (hdfs_table_->IsIcebergTable() && !IcebergPartitionPassesFilters(
-      metadata->partition_id, FilterStats::FILES_KEY, filter_ctxs, file, state)) {
+                 metadata->partition_id, FilterStats::FILES_KEY, filter_ctxs, file, state)) {
     return false;
   }
   return true;
@@ -804,7 +808,7 @@ Status HdfsScanNodeBase::StartNextScanRange(const std::vector<FilterContext>& fi
 }
 
 int64_t HdfsScanNodeBase::IncreaseReservationIncrementally(int64_t curr_reservation,
-      int64_t ideal_reservation) {
+    int64_t ideal_reservation) {
   DiskIoMgr* io_mgr = ExecEnv::GetInstance()->disk_io_mgr();
   // Check if we could use at least one more max-sized I/O buffer for this range. Don't
   // increase in smaller increments since we may not be able to use additional smaller
@@ -921,6 +925,9 @@ Status HdfsScanNodeBase::CreateAndOpenScannerHelper(HdfsPartitionDescriptor* par
         break;
       case THdfsFileFormat::ORC:
         scanner->reset(new HdfsOrcScanner(this, runtime_state_));
+        break;
+      case THdfsFileFormat::JSON:
+        scanner->reset(new HdfsJsonScanner(this, runtime_state_));
         break;
       default:
         return Status(
@@ -1116,8 +1123,8 @@ void HdfsScanNodeBase::PrintHdfsSplitStats(const PerVolumeStats& per_volume_stat
     stringstream* ss) {
   for (PerVolumeStats::const_iterator i = per_volume_stats.begin();
        i != per_volume_stats.end(); ++i) {
-     (*ss) << i->first << ":" << i->second.first << "/"
-         << PrettyPrinter::Print(i->second.second, TUnit::BYTES) << " ";
+    (*ss) << i->first << ":" << i->second.first << "/"
+          << PrettyPrinter::Print(i->second.second, TUnit::BYTES) << " ";
   }
 }
 
@@ -1147,7 +1154,7 @@ void HdfsScanNodeBase::StopAndFinalizeCounters() {
     stringstream ss;
     {
       for (FileTypeCountsMap::const_iterator it = file_type_counts_.begin();
-          it != file_type_counts_.end(); ++it) {
+           it != file_type_counts_.end(); ++it) {
 
         THdfsFileFormat::type file_format = std::get<0>(it->first);
         bool skipped = std::get<1>(it->first);
@@ -1225,13 +1232,13 @@ void HdfsScanNodeBase::StopAndFinalizeCounters() {
 
     if (unexpected_remote_bytes_->value() >= UNEXPECTED_REMOTE_BYTES_WARN_THRESHOLD) {
       runtime_state_->LogError(ErrorMsg(TErrorCode::GENERAL, Substitute(
-          "Read $0 of data across network that was expected to be local. Block locality "
-          "metadata for table '$1.$2' may be stale. This only affects query performance "
-          "and not result correctness. One of the common causes for this warning is HDFS "
-          "rebalancer moving some of the file's blocks. If the issue persists, consider "
-          "running \"INVALIDATE METADATA `$1`.`$2`\".",
-          PrettyPrinter::Print(unexpected_remote_bytes_->value(), TUnit::BYTES),
-          hdfs_table_->database(), hdfs_table_->name())));
+                                                                 "Read $0 of data across network that was expected to be local. Block locality "
+                                                                 "metadata for table '$1.$2' may be stale. This only affects query performance "
+                                                                 "and not result correctness. One of the common causes for this warning is HDFS "
+                                                                 "rebalancer moving some of the file's blocks. If the issue persists, consider "
+                                                                 "running \"INVALIDATE METADATA `$1`.`$2`\".",
+                                                                 PrettyPrinter::Print(unexpected_remote_bytes_->value(), TUnit::BYTES),
+                                                                 hdfs_table_->database(), hdfs_table_->name())));
     }
 
     ImpaladMetrics::IO_MGR_BYTES_READ->Increment(bytes_read_counter()->value());

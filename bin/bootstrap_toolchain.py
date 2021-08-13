@@ -486,7 +486,7 @@ def get_toolchain_downloads():
   gcc_package = ToolchainPackage("gcc")
   toolchain_packages += [llvm_package, llvm_package_asserts, gcc_package]
   toolchain_packages += map(ToolchainPackage,
-      ["avro", "binutils", "boost", "breakpad", "bzip2", "calloncehack", "cctz", "cmake",
+      ["arrow", "avro", "binutils", "boost", "breakpad", "bzip2", "calloncehack", "cctz", "cmake",
        "crcutil", "curl", "flatbuffers", "gdb", "gflags", "glog", "gperftools", "gtest",
        "jwt-cpp", "libev", "libunwind", "lz4", "openldap", "openssl", "orc", "protobuf",
        "python", "rapidjson", "re2", "snappy", "tpc-h", "tpc-ds", "zlib", "zstd"])

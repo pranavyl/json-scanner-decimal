@@ -472,17 +472,7 @@ public class HdfsScanNode extends ScanNode {
   protected void checkForSupportedFileFormats() throws NotImplementedException {
     Preconditions.checkNotNull(desc_);
     Preconditions.checkNotNull(desc_.getTable());
-
-    // Since JSON file format is not yet supported, this block throws an
-    // exception. Once JSON file format will be supported, appropriate changes
-    // can be made under this block.
-    for (FeFsPartition part: partitions_) {
-      HdfsFileFormat format = part.getFileFormat();
-      if (format.equals(HdfsFileFormat.JSON)) {
-        throw new NotImplementedException("Scan of table " + desc_.getTableName() +
-                " in format 'JSON' is not supported.");
-      }
-    }
+    
     Column firstComplexTypedCol = null;
     for (Column col: desc_.getTable().getColumns()) {
       if (col.getType().isComplexType()) {
@@ -1151,15 +1141,15 @@ public class HdfsScanNode extends ScanNode {
     }
 
     long scanRangeBytesLimit = analyzer.getQueryCtx().client_request.getQuery_options()
-        .getMax_scan_range_length();
+            .getMax_scan_range_length();
     scanRangeSpecs_ = new TScanRangeSpec();
 
     if (sampledFiles != null) {
       numPartitionsPerFs_ = sampledFiles.keySet().stream().collect(Collectors.groupingBy(
-          SampledPartitionMetadata::getPartitionFsType, Collectors.counting()));
+              SampledPartitionMetadata::getPartitionFsType, Collectors.counting()));
     } else {
       numPartitionsPerFs_.putAll(partitions_.stream().collect(
-          Collectors.groupingBy(FeFsPartition::getFsType, Collectors.counting())));
+              Collectors.groupingBy(FeFsPartition::getFsType, Collectors.counting())));
     }
 
     totalFilesPerFs_ = new TreeMap<>();
@@ -1171,11 +1161,11 @@ public class HdfsScanNode extends ScanNode {
     boolean allParquet = (partitions_.size() > 0) ? true : false;
     long simpleLimitNumRows = 0; // only used for the simple limit case
     boolean isSimpleLimit = sampleParams_ == null &&
-        (analyzer.getQueryCtx().client_request.getQuery_options()
-            .isOptimize_simple_limit()
-        && analyzer.getSimpleLimitStatus() != null
-        && analyzer.getSimpleLimitStatus().first);
-    for (FeFsPartition partition: partitions_) {
+            (analyzer.getQueryCtx().client_request.getQuery_options()
+                    .isOptimize_simple_limit()
+                    && analyzer.getSimpleLimitStatus() != null
+                    && analyzer.getSimpleLimitStatus().first);
+    for (FeFsPartition partition : partitions_) {
       // Missing disk id accounting is only done for file systems that support the notion
       // of disk/storage ids.
       FileSystem partitionFs;
@@ -1186,15 +1176,15 @@ public class HdfsScanNode extends ScanNode {
       }
       boolean fsHasBlocks = FileSystemUtil.supportsStorageIds(partitionFs);
       List<FileDescriptor> fileDescs = getFileDescriptorsWithLimit(partition, fsHasBlocks,
-          isSimpleLimit ? analyzer.getSimpleLimitStatus().second - simpleLimitNumRows
-                        : -1);
+              isSimpleLimit ? analyzer.getSimpleLimitStatus().second - simpleLimitNumRows
+                      : -1);
       // conservatively estimate 1 row per file
       simpleLimitNumRows += fileDescs.size();
 
       if (sampledFiles != null) {
         // If we are sampling, check whether this partition is included in the sample.
         fileDescs = sampledFiles.get(
-            new SampledPartitionMetadata(partition.getId(), partition.getFsType()));
+                new SampledPartitionMetadata(partition.getId(), partition.getFsType()));
         if (fileDescs == null) continue;
       }
       long partitionNumRows = partition.getNumRows();
@@ -1210,75 +1200,81 @@ public class HdfsScanNode extends ScanNode {
         // Limit the scan range length if generating scan ranges (and we're not
         // short-circuiting the scan for a partition key scan).
         long defaultBlockSize = (partition.getFileFormat().isParquetBased()) ?
-            analyzer.getQueryOptions().parquet_object_store_split_size :
-            partitionFs.getDefaultBlockSize(partition.getLocationPath());
+                analyzer.getQueryOptions().parquet_object_store_split_size :
+                partitionFs.getDefaultBlockSize(partition.getLocationPath());
         long maxBlockSize =
-            Math.max(defaultBlockSize, FileDescriptor.MIN_SYNTHETIC_BLOCK_SIZE);
-        if (scanRangeBytesLimit > 0) {
-          scanRangeBytesLimit = Math.min(scanRangeBytesLimit, maxBlockSize);
+                Math.max(defaultBlockSize, FileDescriptor.MIN_SYNTHETIC_BLOCK_SIZE);
+        if (partition.getFileFormat() == HdfsFileFormat.JSON) {
+          //Handling large files for json-scanner
+          scanRangeBytesLimit = 50000;
         } else {
-          scanRangeBytesLimit = maxBlockSize;
+          if (scanRangeBytesLimit > 0) {
+            scanRangeBytesLimit = Math.min(scanRangeBytesLimit, maxBlockSize);
+          } else {
+            scanRangeBytesLimit = maxBlockSize;
+          }
         }
       }
-      final long partitionBytes = FileDescriptor.computeTotalFileLength(fileDescs);
-      long partitionMaxScanRangeBytes = 0;
-      boolean partitionMissingDiskIds = false;
-      totalBytesPerFs_.merge(partition.getFsType(), partitionBytes, Long::sum);
-      totalFilesPerFs_.merge(partition.getFsType(), (long) fileDescs.size(), Long::sum);
+        final long partitionBytes = FileDescriptor.computeTotalFileLength(fileDescs);
+        long partitionMaxScanRangeBytes = 0;
+        boolean partitionMissingDiskIds = false;
+        totalBytesPerFs_.merge(partition.getFsType(), partitionBytes, Long::sum);
+        totalFilesPerFs_.merge(partition.getFsType(), (long) fileDescs.size(), Long::sum);
 
-      for (FileDescriptor fileDesc: fileDescs) {
-        if (!analyzer.getQueryOptions().isAllow_erasure_coded_files() &&
-            fileDesc.getIsEc()) {
-          throw new ImpalaRuntimeException(String
-              .format("Scanning of HDFS erasure-coded file (%s) is not supported",
-                  fileDesc.getAbsolutePath(partition.getLocation())));
+        for (FileDescriptor fileDesc : fileDescs) {
+          if (!analyzer.getQueryOptions().isAllow_erasure_coded_files() &&
+                  fileDesc.getIsEc()) {
+            throw new ImpalaRuntimeException(String
+                    .format("Scanning of HDFS erasure-coded file (%s) is not supported",
+                            fileDesc.getAbsolutePath(partition.getLocation())));
+          }
+
+          // Accumulate on the number of EC files and the total size of such files.
+          if (fileDesc.getIsEc()) {
+            totalFilesPerFsEC_.merge(partition.getFsType(), 1L, Long::sum);
+            totalBytesPerFsEC_.merge(
+                    partition.getFsType(), fileDesc.getFileLength(), Long::sum);
+          }
+
+          if (!fsHasBlocks) {
+            Preconditions.checkState(fileDesc.getNumFileBlocks() == 0);
+            generateScanRangeSpecs(partition, fileDesc, scanRangeBytesLimit);
+          } else {
+            // Skips files that have no associated blocks.
+            if (fileDesc.getNumFileBlocks() == 0) continue;
+            Pair<Boolean, Long> result = transformBlocksToScanRanges(
+                    partition, fileDesc, fsHasBlocks, scanRangeBytesLimit, analyzer);
+            partitionMaxScanRangeBytes =
+                    Math.max(partitionMaxScanRangeBytes, result.second);
+            if (result.first) partitionMissingDiskIds = true;
+          }
         }
-
-        // Accumulate on the number of EC files and the total size of such files.
-        if (fileDesc.getIsEc()) {
-          totalFilesPerFsEC_.merge(partition.getFsType(), 1L, Long::sum);
-          totalBytesPerFsEC_.merge(
-              partition.getFsType(), fileDesc.getFileLength(), Long::sum);
+        if (partitionMissingDiskIds) ++numPartitionsNoDiskIds_;
+        if (partitionMaxScanRangeBytes > 0 && partitionNumRows >= 0) {
+          updateMaxScanRangeNumRows(
+                  partitionNumRows, partitionBytes, partitionMaxScanRangeBytes);
         }
-
-        if (!fsHasBlocks) {
-          Preconditions.checkState(fileDesc.getNumFileBlocks() == 0);
-          generateScanRangeSpecs(partition, fileDesc, scanRangeBytesLimit);
-        } else {
-          // Skips files that have no associated blocks.
-          if (fileDesc.getNumFileBlocks() == 0) continue;
-          Pair<Boolean, Long> result = transformBlocksToScanRanges(
-              partition, fileDesc, fsHasBlocks, scanRangeBytesLimit, analyzer);
-          partitionMaxScanRangeBytes =
-              Math.max(partitionMaxScanRangeBytes, result.second);
-          if (result.first) partitionMissingDiskIds = true;
+        if (isSimpleLimit && simpleLimitNumRows ==
+                analyzer.getSimpleLimitStatus().second) {
+          // for the simple limit case if the estimated rows has already reached the limit
+          // there's no need to process more partitions
+          break;
         }
       }
-      if (partitionMissingDiskIds) ++numPartitionsNoDiskIds_;
-      if (partitionMaxScanRangeBytes > 0 && partitionNumRows >= 0) {
-        updateMaxScanRangeNumRows(
-            partitionNumRows, partitionBytes, partitionMaxScanRangeBytes);
-      }
-      if (isSimpleLimit && simpleLimitNumRows ==
-          analyzer.getSimpleLimitStatus().second) {
-        // for the simple limit case if the estimated rows has already reached the limit
-        // there's no need to process more partitions
-        break;
+      allParquet_ = allParquet;
+      if (totalFilesPerFs_.isEmpty() || sumValues(totalFilesPerFs_) == 0) {
+        maxScanRangeNumRows_ = 0;
+      } else {
+        // Also estimate max rows per scan range based on table-level stats, in case some
+        // or all partition-level stats were missing.
+        long tableNumRows = tbl_.getNumRows();
+        if (tableNumRows >= 0) {
+          updateMaxScanRangeNumRows(
+                  tableNumRows, sumValues(totalBytesPerFs_), largestScanRangeBytes_);
+        }
       }
     }
-    allParquet_ = allParquet;
-    if (totalFilesPerFs_.isEmpty() || sumValues(totalFilesPerFs_) == 0) {
-      maxScanRangeNumRows_ = 0;
-    } else {
-      // Also estimate max rows per scan range based on table-level stats, in case some
-      // or all partition-level stats were missing.
-      long tableNumRows = tbl_.getNumRows();
-      if (tableNumRows >= 0) {
-        updateMaxScanRangeNumRows(
-            tableNumRows, sumValues(totalBytesPerFs_), largestScanRangeBytes_);
-      }
-    }
-  }
+
 
   protected List<FileDescriptor> getFileDescriptorsWithLimit(
       FeFsPartition partition, boolean fsHasBlocks, long limit) {

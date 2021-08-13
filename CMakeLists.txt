@@ -111,6 +111,7 @@ endfunction()
 #   PACKAGE_ROOT set to $ENV{IMPALA_TOOLCHAIN_PACKAGES_HOME}/PACKAGE-$ENV{IMPALA_PACKAGE_VERSION}
 set_dep_root(AVRO)
 set_dep_root(ORC)
+set_dep_root(ARROW)
 set_dep_root(BOOST)
 set_dep_root(BREAKPAD)
 set_dep_root(BZIP2)
@@ -358,6 +359,10 @@ IMPALA_ADD_THIRDPARTY_LIB(avro ${AVRO_INCLUDE_DIR} ${AVRO_STATIC_LIB} "")
 # find ORC headers and libs
 find_package(Orc REQUIRED)
 IMPALA_ADD_THIRDPARTY_LIB(orc ${ORC_INCLUDE_DIR} ${ORC_STATIC_LIB} "")
+
+# find Arrow headers and libs
+find_package(Arrow REQUIRED)
+IMPALA_ADD_THIRDPARTY_LIB(arrow ${ARROW_INCLUDE_DIR} ${ARROW_STATIC_LIB} "")
 
 # find CCTZ headers and libs
 find_package(Cctz REQUIRED)

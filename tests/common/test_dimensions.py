@@ -32,7 +32,7 @@ WORKLOAD_DIR = os.environ['IMPALA_WORKLOAD_DIR']
 # to use when running the query.
 class TableFormatInfo(object):
   KNOWN_FILE_FORMATS = ['text', 'seq', 'rc', 'parquet', 'orc', 'avro', 'hbase',
-                        'kudu', 'iceberg']
+                        'kudu', 'iceberg', 'json']
   KNOWN_COMPRESSION_CODECS = ['none', 'snap', 'gzip', 'bzip', 'def', 'zstd', 'lz4']
   KNOWN_COMPRESSION_TYPES = ['none', 'block', 'record']
 

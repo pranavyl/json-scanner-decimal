@@ -1078,6 +1078,7 @@ bool BufferedTupleStream::DeepCopyInternal(
       Tuple* t = row->GetTuple(i);
       // TODO: Once IMPALA-1306 (Avoid passing empty tuples of non-materialized slots)
       // is delivered, the check below should become DCHECK(t != nullptr).
+      VLOG_QUERY<< "Tuple-size-buffered-tuple-stream:::"<<tuple_size;
       DCHECK(t != nullptr || tuple_size == 0);
       memcpy(pos, t, tuple_size);
       pos += tuple_size;

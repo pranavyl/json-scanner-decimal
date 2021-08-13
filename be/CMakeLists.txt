@@ -405,6 +405,7 @@ set(CLANG_INCLUDE_FLAGS
   "-I${RAPIDJSON_INCLUDE_DIR}"
   "-I${AVRO_INCLUDE_DIR}"
   "-I${ORC_INCLUDE_DIR}"
+  "-I${ARROW_INCLUDE_DIR}"
   # Include Boost as a system directory to suppress warnings from headers.
   "-isystem${BOOST_INCLUDEDIR}"
   "-I${KUDU_CLIENT_INCLUDE_DIR}"
@@ -634,7 +635,8 @@ set (IMPALA_DEPENDENCIES
   java_jvm
   kudu_client
   cctz
-  curl)
+  curl
+  arrow)
 
 # When building with Clang, linking fails because it is trying to
 # use a symbol in kudu_client, but that symbol is discarded. To
