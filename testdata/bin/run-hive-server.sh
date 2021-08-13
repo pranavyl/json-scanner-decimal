@@ -138,7 +138,7 @@ if [ ${START_METASTORE} -eq 1 ]; then
 fi
 
 # Include the latest libfesupport.so in the JAVA_LIBRARY_PATH
-export JAVA_LIBRARY_PATH="${JAVA_LIBRARY_PATH-}:${IMPALA_HOME}/be/build/latest/service/"
+#export JAVA_LIBRARY_PATH="${JAVA_LIBRARY_PATH-}:${IMPALA_HOME}/be/build/latest/service/"
 
 export HIVESERVER2_HADOOP_OPTS="-Xdebug -Xrunjdwp:transport=dt_socket,server=y,\
 suspend=n,address=30020"

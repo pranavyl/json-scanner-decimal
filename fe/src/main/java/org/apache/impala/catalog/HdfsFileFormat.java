@@ -249,7 +249,6 @@ public enum HdfsFileFormat {
     switch (this) {
       case TEXT:
         return compression == HdfsCompression.NONE;
-      case JSON:
       case RC_FILE:
       case SEQUENCE_FILE:
       case AVRO:
@@ -258,6 +257,7 @@ public enum HdfsFileFormat {
       case ORC:
       case ICEBERG:
         return true;
+      case JSON:
       case KUDU:
         return false;
       default:
