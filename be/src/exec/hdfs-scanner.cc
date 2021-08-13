@@ -35,6 +35,7 @@
 #include "util/bitmap.h"
 #include "util/codec.h"
 #include "util/test-info.h"
+#include "util/debug-util.h"
 
 #include "common/names.h"
 

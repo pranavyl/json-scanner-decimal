@@ -149,7 +149,7 @@ DATASET_DIR = os.path.join(os.environ['IMPALA_HOME'], 'testdata', 'datasets')
 SQL_OUTPUT_DIR = os.environ['IMPALA_DATA_LOADING_SQL_DIR']
 AVRO_SCHEMA_DIR = "avro_schemas"
 DEFAULT_FS=os.environ['DEFAULT_FS']
-IMPALA_SUPPORTED_INSERT_FORMATS = ['parquet', 'hbase', 'text', 'kudu']
+IMPALA_SUPPORTED_INSERT_FORMATS = ['parquet', 'hbase', 'text', 'kudu', 'json']
 
 IMPALA_PARQUET_COMPRESSION_MAP = \
   {
@@ -204,6 +204,7 @@ FILE_FORMAT_MAP = {
   'hbase': "'org.apache.hadoop.hive.hbase.HBaseStorageHandler'",
   'kudu': "KUDU",
   'iceberg': "ICEBERG",
+  'json': "JSONFILE"
   }
 
 HIVE_TO_AVRO_TYPE_MAP = {
@@ -249,7 +250,7 @@ def build_create_statement(table_template, table_name, db_name, db_suffix,
                    % (tbl_type, db_name, db_suffix, table_name)
   # hbase / kudu tables are external, and not read from hdfs. We don't need an
   # hdfs_location.
-  if file_format in ['hbase', 'kudu']:
+  if file_format in ['hbase', 'kudu', 'json']:
     hdfs_location = str()
     # Remove location part from the format string
     table_template = table_template.replace("LOCATION '{hdfs_location}'", "")
