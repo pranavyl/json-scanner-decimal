@@ -568,8 +568,6 @@ class ClientRequestState {
   /// converted into a TRowSet. Materializing rows includes evaluating any yet unevaluated
   /// expressions using ScalarExprEvaluators.
   RuntimeProfile::Counter* row_materialization_timer_;
-  RuntimeProfile::Counter* add_rows_timer_;
-  RuntimeProfile::Counter* add_rows_rate_;
 
   /// Tracks the rate that rows are materialized.
   RuntimeProfile::Counter* row_materialization_rate_;

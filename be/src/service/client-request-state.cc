@@ -123,16 +123,11 @@ ClientRequestState::ClientRequestState(const TQueryCtx& query_ctx, Frontend* fro
       "DEBUG build of Impala. Use RELEASE builds to measure query performance.");
 #endif
   row_materialization_timer_ = ADD_TIMER(server_profile_, "RowMaterializationTimer");
-  add_rows_timer_ = ADD_TIMER(server_profile_, "AddRowsTimer");
   num_rows_fetched_counter_ = ADD_COUNTER(server_profile_, "NumRowsFetched", TUnit::UNIT);
   row_materialization_rate_ =
       server_profile_->AddDerivedCounter("RowMaterializationRate", TUnit::UNIT_PER_SECOND,
           bind<int64_t>(&RuntimeProfile::UnitsPerSecond, num_rows_fetched_counter_,
                                              row_materialization_timer_));
-  add_rows_rate_ =
-      server_profile_->AddDerivedCounter("AddRowsRate", TUnit::UNIT_PER_SECOND,
-          bind<int64_t>(&RuntimeProfile::UnitsPerSecond, num_rows_fetched_counter_,
-              add_rows_timer_));
   num_rows_fetched_from_cache_counter_ =
       ADD_COUNTER(server_profile_, "NumRowsFetchedFromCache", TUnit::UNIT);
   client_wait_timer_ = ADD_TIMER(server_profile_, "ClientFetchWaitTimer");
@@ -1257,23 +1252,21 @@ Status ClientRequestState::FetchRowsInternal(const int32_t max_rows,
   // state beyond that should have a non-OK query_status_ set).
   DCHECK(exec_state() == ExecState::FINISHED);
 
-    //SCOPED_TIMER(add_rows_timer_);
+  if (eos_.Load()) return Status::OK();
 
-    if (eos_.Load()) return Status::OK();
-
-    if (request_result_set_ != NULL) {
-      int num_rows = 0;
-      const vector<TResultRow>& all_rows = (*(request_result_set_.get()));
-      // max_rows <= 0 means no limit
-      while (
-          (num_rows < max_rows || max_rows <= 0) && num_rows_fetched_ < all_rows.size()) {
-        RETURN_IF_ERROR(fetched_rows->AddOneRow(all_rows[num_rows_fetched_]));
-        ++num_rows_fetched_;
-        ++num_rows;
-      }
-      eos_.Store(num_rows_fetched_ == all_rows.size());
-      return Status::OK();
+  if (request_result_set_ != NULL) {
+    int num_rows = 0;
+    const vector<TResultRow>& all_rows = (*(request_result_set_.get()));
+    // max_rows <= 0 means no limit
+    while ((num_rows < max_rows || max_rows <= 0)
+        && num_rows_fetched_ < all_rows.size()) {
+      RETURN_IF_ERROR(fetched_rows->AddOneRow(all_rows[num_rows_fetched_]));
+      ++num_rows_fetched_;
+      ++num_rows;
     }
+    eos_.Store(num_rows_fetched_ == all_rows.size());
+    return Status::OK();
+  }
 
   Coordinator* coordinator = GetCoordinator();
   if (coordinator == nullptr) {
@@ -1282,16 +1275,13 @@ Status ClientRequestState::FetchRowsInternal(const int32_t max_rows,
 
   int32_t num_rows_fetched_from_cache = 0;
   if (result_cache_max_size_ > 0 && result_cache_ != NULL) {
-    {
-        SCOPED_TIMER(add_rows_timer_);
-        // Satisfy the fetch from the result cache if possible.
-        int cache_fetch_size = (max_rows <= 0) ? result_cache_->size() : max_rows;
-        num_rows_fetched_from_cache = fetched_rows->AddRows(
-            result_cache_.get(), num_rows_fetched_, cache_fetch_size);
-        num_rows_fetched_ += num_rows_fetched_from_cache;
-        COUNTER_ADD(num_rows_fetched_from_cache_counter_, num_rows_fetched_from_cache);
-        if (num_rows_fetched_from_cache >= max_rows) return Status::OK();
-    }
+    // Satisfy the fetch from the result cache if possible.
+    int cache_fetch_size = (max_rows <= 0) ? result_cache_->size() : max_rows;
+    num_rows_fetched_from_cache =
+        fetched_rows->AddRows(result_cache_.get(), num_rows_fetched_, cache_fetch_size);
+    num_rows_fetched_ += num_rows_fetched_from_cache;
+    COUNTER_ADD(num_rows_fetched_from_cache_counter_, num_rows_fetched_from_cache);
+    if (num_rows_fetched_from_cache >= max_rows) return Status::OK();
   }
 
   // Maximum number of rows to be fetched from the coord.
@@ -1309,12 +1299,10 @@ Status ClientRequestState::FetchRowsInternal(const int32_t max_rows,
     // (already held) ensures that we do not call coord_->GetNext() multiple times
     // concurrently.
     // TODO: Simplify this.
-      SCOPED_TIMER(add_rows_timer_);
-      lock_.unlock();
-
-      Status status =
-          coordinator->GetNext(fetched_rows, max_coord_rows, &eos, block_on_wait_time_us);
-      lock_.lock();
+    lock_.unlock();
+    Status status =
+        coordinator->GetNext(fetched_rows, max_coord_rows, &eos, block_on_wait_time_us);
+    lock_.lock();
 
     if (eos) eos_.Store(true);
 
