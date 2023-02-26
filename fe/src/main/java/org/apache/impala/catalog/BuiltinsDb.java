@@ -1013,6 +1013,37 @@ public class BuiltinsDb extends Db {
           prefix + "11CountRemoveEPN10impala_udf15FunctionContextERKNS1_6AnyValEPNS1_9BigIntValE",
           null, false, true, true));
 
+      /*
+      db.addBuiltin(AggregateFunction.createBuiltin(db, "regr_count",
+          Lists.newArrayList(t), Type.BIGINT, Type.BIGINT,
+          prefix + "8InitZeroIN10impala_udf9BigIntValEEEvPNS2_15FunctionContextEPT_",
+          prefix + "15RegrCountUpdateEPN10impala_udf15FunctionContextERKNS1_6AnyValES6_PNS1_9BigIntValE",
+          prefix + "10CountMergeEPN10impala_udf15FunctionContextERKNS1_9BigIntValEPS4_",
+          null, null,
+          prefix + "15RegrCountRemoveEPN10impala_udf15FunctionContextERKNS1_6AnyValES6_PNS1_9BigIntValE",
+          null, false, true, true));
+
+
+
+      db.addBuiltin(AggregateFunction.createBuiltin(db, "regr_count",
+              Lists.<Type>newArrayList(Type.DOUBLE, Type.DOUBLE), Type.DOUBLE, Type.STRING,
+              prefix + "8InitZeroIN10impala_udf9BigIntValEEEvPNS2_15FunctionContextEPT_",
+              prefix + "15RegrCountUpdateEPN10impala_udf15FunctionContextERKNS1_6AnyValES6_PNS1_9BigIntValE",
+              prefix + "10CountMergeEPN10impala_udf15FunctionContextERKNS1_9BigIntValEPS4_",
+              null, null,
+              prefix + "15RegrCountRemoveEPN10impala_udf15FunctionContextERKNS1_6AnyValES6_PNS1_9BigIntValE",
+              null, false, true, true));
+
+       */
+      db.addBuiltin(AggregateFunction.createBuiltin(db, "regr_count",
+              Lists.newArrayList(t, t), Type.DOUBLE, Type.STRING,
+              prefix + "8InitZeroIN10impala_udf9BigIntValEEEvPNS2_15FunctionContextEPT_",
+              prefix + "15RegrCountUpdateEPN10impala_udf15FunctionContextERKNS1_6AnyValES6_PNS1_9BigIntValE",
+              prefix + "10CountMergeEPN10impala_udf15FunctionContextERKNS1_9BigIntValEPS4_",
+              null, null,
+              prefix + "15RegrCountRemoveEPN10impala_udf15FunctionContextERKNS1_6AnyValES6_PNS1_9BigIntValE",
+              null, false, true, true));
+
       // Min
       String minMaxInit = t.isStringType() ? initNullString : initNull;
       String minMaxSerializeOrFinalize = t.isStringType() ?
@@ -1367,6 +1398,74 @@ public class BuiltinsDb extends Db {
         prefix + "12CorrFinalizeEPN10impala_udf15FunctionContextERKNS1_9StringValE",
         false, true, false));
 
+    db.addBuiltin(AggregateFunction.createBuiltin(db, "regr_r2",
+            Lists.<Type>newArrayList(Type.DOUBLE, Type.DOUBLE), Type.DOUBLE, Type.STRING,
+            prefix + "8CorrInitEPN10impala_udf15FunctionContextEPNS1_9StringValE",
+            prefix + "10CorrUpdateEPN10impala_udf15FunctionContextERKNS1_9DoubleValES6_PNS1_9StringValE",
+            prefix + "9CorrMergeEPN10impala_udf15FunctionContextERKNS1_9StringValEPS4_",
+            stringValSerializeOrFinalize,
+            prefix + "15Regr_r2GetValueEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            prefix + "10CorrRemoveEPN10impala_udf15FunctionContextERKNS1_9DoubleValES6_PNS1_9StringValE",
+            prefix + "15Regr_r2FinalizeEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            false, true, false));
+
+    db.addBuiltin(AggregateFunction.createBuiltin(db, "regr_r2",
+            Lists.<Type>newArrayList(Type.TIMESTAMP, Type.TIMESTAMP), Type.DOUBLE, Type.STRING,
+            prefix + "8CorrInitEPN10impala_udf15FunctionContextEPNS1_9StringValE",
+            prefix +
+                    "19TimestampCorrUpdateEPN10impala_udf15FunctionContextERKNS1_12TimestampValES6_PNS1_9StringValE",
+            prefix + "9CorrMergeEPN10impala_udf15FunctionContextERKNS1_9StringValEPS4_",
+            stringValSerializeOrFinalize,
+            prefix + "15Regr_r2GetValueEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            prefix +
+                    "19TimestampCorrRemoveEPN10impala_udf15FunctionContextERKNS1_12TimestampValES6_PNS1_9StringValE",
+            prefix + "15Regr_r2FinalizeEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            false, true, false));
+
+    db.addBuiltin(AggregateFunction.createBuiltin(db, "regr_slope",
+            Lists.<Type>newArrayList(Type.DOUBLE, Type.DOUBLE), Type.DOUBLE, Type.STRING,
+            prefix + "13RegrSlopeInitEPN10impala_udf15FunctionContextEPNS1_9StringValE",
+            prefix + "15RegrSlopeUpdateEPN10impala_udf15FunctionContextERKNS1_9DoubleValES6_PNS1_9StringValE",
+            prefix + "14RegrSlopeMergeEPN10impala_udf15FunctionContextERKNS1_9StringValEPS4_",
+            stringValSerializeOrFinalize,
+            prefix + "17RegrSlopeGetValueEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            prefix + "15RegrSlopeRemoveEPN10impala_udf15FunctionContextERKNS1_9DoubleValES6_PNS1_9StringValE",
+            prefix + "17RegrSlopeFinalizeEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            false, true, false));
+
+    db.addBuiltin(AggregateFunction.createBuiltin(db, "regr_slope",
+            Lists.<Type>newArrayList(Type.TIMESTAMP, Type.TIMESTAMP), Type.DOUBLE, Type.STRING,
+            prefix + "13RegrSlopeInitEPN10impala_udf15FunctionContextEPNS1_9StringValE",
+            prefix + "24TimestampRegrSlopeUpdateEPN10impala_udf15FunctionContextERKNS1_12TimestampValES6_PNS1_9StringValE",
+            prefix + "14RegrSlopeMergeEPN10impala_udf15FunctionContextERKNS1_9StringValEPS4_",
+            stringValSerializeOrFinalize,
+            prefix + "17RegrSlopeGetValueEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            prefix + "24TimestampRegrSlopeRemoveEPN10impala_udf15FunctionContextERKNS1_12TimestampValES6_PNS1_9StringValE",
+            prefix + "17RegrSlopeFinalizeEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            false, true, false));
+
+    db.addBuiltin(AggregateFunction.createBuiltin(db, "regr_intercept",
+            Lists.<Type>newArrayList(Type.DOUBLE, Type.DOUBLE), Type.DOUBLE, Type.STRING,
+            prefix + "13RegrSlopeInitEPN10impala_udf15FunctionContextEPNS1_9StringValE",
+            prefix + "15RegrSlopeUpdateEPN10impala_udf15FunctionContextERKNS1_9DoubleValES6_PNS1_9StringValE",
+            prefix + "14RegrSlopeMergeEPN10impala_udf15FunctionContextERKNS1_9StringValEPS4_",
+            stringValSerializeOrFinalize,
+            prefix + "21RegrInterceptGetValueEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            prefix + "15RegrSlopeRemoveEPN10impala_udf15FunctionContextERKNS1_9DoubleValES6_PNS1_9StringValE",
+            prefix + "21RegrInterceptFinalizeEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            false, true, false));
+
+    db.addBuiltin(AggregateFunction.createBuiltin(db, "regr_intercept",
+            Lists.<Type>newArrayList(Type.TIMESTAMP, Type.TIMESTAMP), Type.DOUBLE, Type.STRING,
+            prefix + "13RegrSlopeInitEPN10impala_udf15FunctionContextEPNS1_9StringValE",
+            prefix + "24TimestampRegrSlopeUpdateEPN10impala_udf15FunctionContextERKNS1_12TimestampValES6_PNS1_9StringValE",
+            prefix + "14RegrSlopeMergeEPN10impala_udf15FunctionContextERKNS1_9StringValEPS4_",
+            stringValSerializeOrFinalize,
+            prefix + "21RegrInterceptGetValueEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            prefix + "24TimestampRegrSlopeRemoveEPN10impala_udf15FunctionContextERKNS1_12TimestampValES6_PNS1_9StringValE",
+            prefix + "21RegrInterceptFinalizeEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+            false, true, false));
+
     // Covar_samp()
     db.addBuiltin(AggregateFunction.createBuiltin(db, "covar_samp",
         Lists.<Type>newArrayList(Type.DOUBLE, Type.DOUBLE), Type.DOUBLE, Type.STRING,
@@ -1415,6 +1514,28 @@ public class BuiltinsDb extends Db {
         prefix +
                 "20TimestampCovarRemoveEPN10impala_udf15FunctionContextERKNS1_12TimestampValES6_PNS1_9StringValE",
         prefix + "23CovarPopulationFinalizeEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+        false, true, false));
+
+    db.addBuiltin(AggregateFunction.createBuiltin(db, "regr_sxy",
+        Lists.<Type>newArrayList(Type.DOUBLE, Type.DOUBLE), Type.DOUBLE, Type.STRING,
+        prefix + "11RegrSXYInitEPN10impala_udf15FunctionContextEPNS1_9StringValE",
+        prefix + "13RegrSXYUpdateEPN10impala_udf15FunctionContextERKNS1_9DoubleValES6_PNS1_9StringValE",
+        prefix + "12RegrSXYMergeEPN10impala_udf15FunctionContextERKNS1_9StringValEPS4_",
+        stringValSerializeOrFinalize,
+        prefix + "15RegrSXYGetValueEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+        prefix + "13RegrSXYRemoveEPN10impala_udf15FunctionContextERKNS1_9DoubleValES6_PNS1_9StringValE",
+        prefix + "15RegrSXYFinalizeEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+        false, true, false));
+
+    db.addBuiltin(AggregateFunction.createBuiltin(db, "regr_sxy",
+        Lists.<Type>newArrayList(Type.TIMESTAMP, Type.TIMESTAMP), Type.DOUBLE, Type.STRING,
+        prefix + "11RegrSXYInitEPN10impala_udf15FunctionContextEPNS1_9StringValE",
+        prefix + "22TimestampRegrSXYUpdateEPN10impala_udf15FunctionContextERKNS1_12TimestampValES6_PNS1_9StringValE",
+        prefix + "12RegrSXYMergeEPN10impala_udf15FunctionContextERKNS1_9StringValEPS4_",
+        stringValSerializeOrFinalize,
+        prefix + "15RegrSXYGetValueEPN10impala_udf15FunctionContextERKNS1_9StringValE",
+        prefix + "22TimestampRegrSXYRemoveEPN10impala_udf15FunctionContextERKNS1_12TimestampValES6_PNS1_9StringValE",
+        prefix + "15RegrSXYFinalizeEPN10impala_udf15FunctionContextERKNS1_9StringValE",
         false, true, false));
 
     // Avg

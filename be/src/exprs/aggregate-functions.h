@@ -64,6 +64,22 @@ class AggregateFunctions {
   static StringVal StringValSerializeOrFinalize(
       FunctionContext* ctx, const StringVal& src);
 
+  /// Implementation of regr_slope() and regr_intercept()
+  static void RegrSlopeInit(FunctionContext* ctx, StringVal* dst);
+  static void RegrSlopeUpdate(FunctionContext* ctx, const DoubleVal& src1,
+      const DoubleVal& src2, StringVal* dst);
+  static void RegrSlopeRemove(FunctionContext* ctx, const DoubleVal& src1,
+      const DoubleVal& src2, StringVal* dst);
+  static void TimestampRegrSlopeUpdate(FunctionContext* ctx,
+      const TimestampVal& src1, const TimestampVal& src2, StringVal* dst);
+  static void TimestampRegrSlopeRemove(FunctionContext* ctx,
+      const TimestampVal& src1, const TimestampVal& src2, StringVal* dst);
+  static void RegrSlopeMerge(FunctionContext* ctx, const StringVal& src, StringVal* dst);
+  static DoubleVal RegrSlopeGetValue(FunctionContext* ctx, const StringVal& src);
+  static DoubleVal RegrSlopeFinalize(FunctionContext* ctx, const StringVal& src);
+  static DoubleVal RegrInterceptGetValue(FunctionContext* ctx, const StringVal& src);
+  static DoubleVal RegrInterceptFinalize(FunctionContext* ctx, const StringVal& src);
+
   /// Implementation of Corr()
   static void CorrInit(FunctionContext* ctx, StringVal* dst);
   static void CorrUpdate(FunctionContext* ctx, const DoubleVal& src1,
@@ -77,6 +93,10 @@ class AggregateFunctions {
   static void CorrMerge(FunctionContext* ctx, const StringVal& src, StringVal* dst);
   static DoubleVal CorrGetValue(FunctionContext* ctx, const StringVal& src);
   static DoubleVal CorrFinalize(FunctionContext* ctx, const StringVal& src);
+
+  /// Implementation of regr_r2()
+  static DoubleVal Regr_r2GetValue(FunctionContext* ctx, const StringVal& src);
+  static DoubleVal Regr_r2Finalize(FunctionContext* ctx, const StringVal& src);
 
   /// Implementation of Covar_samp() and Covar_pop()
   static void CovarInit(FunctionContext* ctx, StringVal* dst);
@@ -102,6 +122,21 @@ class AggregateFunctions {
   static void CountRemove(FunctionContext*, const AnyVal& src, BigIntVal* dst);
   static void CountStarRemove(FunctionContext*, BigIntVal* dst);
   static void CountMerge(FunctionContext*, const BigIntVal& src, BigIntVal* dst);
+  static void RegrCountUpdate(FunctionContext*, const AnyVal& src1, const AnyVal& src2, BigIntVal* dst);
+  static void RegrCountRemove(FunctionContext*, const AnyVal& src1, const AnyVal& src2, BigIntVal* dst);
+
+  static void RegrSXYInit(FunctionContext* ctx, StringVal* dst);
+  static void RegrSXYUpdate(FunctionContext* ctx, const DoubleVal& src1,
+      const DoubleVal& src2, StringVal* dst);
+  static void RegrSXYRemove(FunctionContext* ctx, const DoubleVal& src1,
+      const DoubleVal& src2, StringVal* dst);
+  static void TimestampRegrSXYUpdate(FunctionContext* ctx,
+      const TimestampVal& src1, const TimestampVal& src2, StringVal* dst);
+  static void TimestampRegrSXYRemove(FunctionContext* ctx,
+      const TimestampVal& src1, const TimestampVal& src2, StringVal* dst);
+  static void RegrSXYMerge(FunctionContext* ctx, const StringVal& src, StringVal* dst);
+  static DoubleVal RegrSXYGetValue(FunctionContext* ctx, const StringVal& src);
+  static DoubleVal RegrSXYFinalize(FunctionContext* ctx, const StringVal& src);
 
   /// Implementation of Avg.
   /// TODO: Change this to use a fixed-sized BufferVal as intermediate type.
