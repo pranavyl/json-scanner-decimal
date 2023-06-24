@@ -514,6 +514,9 @@ visible_functions = [
   [['lpad'], 'STRING', ['STRING', 'BIGINT', 'STRING'], 'impala::StringFunctions::Lpad'],
   [['rpad'], 'STRING', ['STRING', 'BIGINT', 'STRING'], 'impala::StringFunctions::Rpad'],
   [['bytes'], 'INT', ['STRING'], 'impala::StringFunctions::Bytes'],
+
+  [['aes_encrypt'], 'STRING', ['STRING', 'STRING', 'STRING', 'STRING','STRING'], 'impala::StringFunctions::aes_encrypt'],
+  [['aes_decrypt'], 'STRING', ['STRING', 'STRING', 'STRING', 'STRING','STRING'], 'impala::StringFunctions::aes_decrypt'],
   [['length'], 'INT', ['STRING'], 'impala::StringFunctions::Length'],
   [['length'], 'INT', ['BINARY'], 'impala::StringFunctions::Bytes'],
   [['length'], 'INT', ['CHAR'], 'impala::StringFunctions::CharLength'],

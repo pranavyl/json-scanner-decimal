@@ -65,7 +65,7 @@ class OpenSSLUtilTest : public ::testing::Test {
     }
 
     // Check all the modes
-    AES_CIPHER_MODE modes[] = {AES_256_GCM, AES_256_CTR, AES_256_CFB};
+    AES_CIPHER_MODE modes[] = {impala::AES_CIPHER_MODE::AES_256_GCM, impala::AES_CIPHER_MODE::AES_256_CTR, impala::AES_CIPHER_MODE::AES_256_CFB};
     for (auto m : modes) {
       memcpy(scratch.data(), original.data(), buffer_size);
 
@@ -95,7 +95,7 @@ TEST_F(OpenSSLUtilTest, Encryption) {
   GenerateRandomData(original.data(), buffer_size);
 
   // Check both CTR & CFB
-  AES_CIPHER_MODE modes[] = {AES_256_GCM, AES_256_CTR, AES_256_CFB};
+  AES_CIPHER_MODE modes[] = {impala::AES_CIPHER_MODE::AES_256_GCM, impala::AES_CIPHER_MODE::AES_256_CTR, impala::AES_CIPHER_MODE::AES_256_CFB};
   for (auto m : modes) {
     // Iterate multiple times to ensure that key regeneration works correctly.
     EncryptionKey key;
@@ -146,7 +146,7 @@ TEST_F(OpenSSLUtilTest, GcmIntegrity) {
 
   EncryptionKey key;
   key.InitializeRandom();
-  key.SetCipherMode(AES_256_GCM);
+  key.SetCipherMode(impala::AES_CIPHER_MODE::AES_256_GCM);
 
   // Even it has been set as GCM mode, it may fall back to other modes.
   // Check if GCM mode is supported at runtime.

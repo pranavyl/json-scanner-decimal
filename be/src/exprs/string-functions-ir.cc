@@ -18,8 +18,12 @@
 #include "exprs/string-functions.h"
 
 #include <cctype>
+#include <cstring>
 #include <numeric>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
 #include <stdint.h>
+#include <string>
 #include <re2/re2.h>
 #include <re2/stringpiece.h>
 
@@ -31,8 +35,10 @@
 #include "gutil/strings/substitute.h"
 #include "runtime/string-value.inline.h"
 #include "runtime/tuple-row.h"
+#include "udf/udf.h"
 #include "util/bit-util.h"
 #include "util/coding-util.h"
+#include "util/openssl-util.h"
 #include "util/pretty-printer.h"
 #include "util/string-util.h"
 #include "util/ubsan.h"
@@ -151,8 +157,8 @@ StringVal StringFunctions::Space(FunctionContext* context, const BigIntVal& len)
   if (len.val <= 0) return StringVal();
   if (len.val > StringVal::MAX_LENGTH) {
     context->SetError(Substitute(ERROR_CHARACTER_LIMIT_EXCEEDED,
-         "space() result",
-         PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
+        "space() result",
+        PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
     return StringVal::null();
   }
   StringVal result(context, len.val);
@@ -1158,8 +1164,8 @@ StringVal StringFunctions::Concat(
 
   if (total_size > StringVal::MAX_LENGTH) {
     context->SetError(Substitute(ERROR_CHARACTER_LIMIT_EXCEEDED,
-         "Concatenated string length",
-         PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
+        "Concatenated string length",
+        PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
     return StringVal::null();
   }
 
@@ -1206,8 +1212,8 @@ StringVal StringFunctions::ConcatWs(FunctionContext* context, const StringVal& s
 
   if (total_size > StringVal::MAX_LENGTH) {
     context->SetError(Substitute(ERROR_CHARACTER_LIMIT_EXCEEDED,
-         "Concatenated string length",
-         PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
+        "Concatenated string length",
+        PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
     return StringVal::null();
   }
 
@@ -1338,7 +1344,7 @@ StringVal StringFunctions::ParseUrlKey(FunctionContext* ctx, const StringVal& ur
 
   StringValue result;
   if (!UrlParser::ParseUrlKey(StringValue::FromStringVal(url), url_part,
-                              StringValue::FromStringVal(key), &result)) {
+          StringValue::FromStringVal(key), &result)) {
     // url is malformed, or url_part is invalid.
     if (url_part == UrlParser::INVALID) {
       stringstream ss;
@@ -1618,8 +1624,8 @@ DoubleVal StringFunctions::JaroSimilarity(
   }
   double m = static_cast<double>(matching_characters);
   double jaro_similarity = 1.0 / 3.0  * ( m / static_cast<double>(s1len)
-                                        + m / static_cast<double>(s2len)
-                                        + (m - transpositions) / m );
+      + m / static_cast<double>(s2len)
+      + (m - transpositions) / m );
 
   ctx->Free(reinterpret_cast<uint8_t*>(s1_matching));
   ctx->Free(reinterpret_cast<uint8_t*>(s2_matching));
@@ -1637,27 +1643,27 @@ DoubleVal StringFunctions::JaroDistance(
 }
 
 DoubleVal StringFunctions::JaroWinklerDistance(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2) {
+    const StringVal& s1, const StringVal& s2) {
   return StringFunctions::JaroWinklerDistance(ctx, s1, s2,
-    DoubleVal(0.1), DoubleVal(0.7));
+      DoubleVal(0.1), DoubleVal(0.7));
 }
 
 DoubleVal StringFunctions::JaroWinklerDistance(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2,
-      const DoubleVal& scaling_factor) {
+    const StringVal& s1, const StringVal& s2,
+    const DoubleVal& scaling_factor) {
   return StringFunctions::JaroWinklerDistance(ctx, s1, s2,
-    scaling_factor, DoubleVal(0.7));
+      scaling_factor, DoubleVal(0.7));
 }
 
 // Based on https://en.wikipedia.org/wiki/Jaro%E2%80%93Winkler_distance
 // Implements Jaro-Winkler distance
 // Extended with boost_theshold: Winkler's modification only applies if Jaro exceeds it
 DoubleVal StringFunctions::JaroWinklerDistance(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2,
-      const DoubleVal& scaling_factor, const DoubleVal& boost_threshold) {
+    const StringVal& s1, const StringVal& s2,
+    const DoubleVal& scaling_factor, const DoubleVal& boost_threshold) {
 
   DoubleVal jaro_winkler_similarity = StringFunctions::JaroWinklerSimilarity(
-    ctx, s1, s2, scaling_factor, boost_threshold);
+      ctx, s1, s2, scaling_factor, boost_threshold);
 
   if (jaro_winkler_similarity.is_null) return DoubleVal::null();
   if (jaro_winkler_similarity.val == -1.0) return DoubleVal(-1.0);
@@ -1665,24 +1671,24 @@ DoubleVal StringFunctions::JaroWinklerDistance(FunctionContext* ctx,
 }
 
 DoubleVal StringFunctions::JaroWinklerSimilarity(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2) {
+    const StringVal& s1, const StringVal& s2) {
   return StringFunctions::JaroWinklerSimilarity(ctx, s1, s2,
-    DoubleVal(0.1), DoubleVal(0.7));
+      DoubleVal(0.1), DoubleVal(0.7));
 }
 
 DoubleVal StringFunctions::JaroWinklerSimilarity(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2,
-      const DoubleVal& scaling_factor) {
+    const StringVal& s1, const StringVal& s2,
+    const DoubleVal& scaling_factor) {
   return StringFunctions::JaroWinklerSimilarity(ctx, s1, s2,
-    scaling_factor, DoubleVal(0.7));
+      scaling_factor, DoubleVal(0.7));
 }
 
 // Based on https://en.wikipedia.org/wiki/Jaro%E2%80%93Winkler_distance
 // Implements Jaro-Winkler similarity
 // Extended with boost_theshold: Winkler's modification only applies if Jaro exceeds it
 DoubleVal StringFunctions::JaroWinklerSimilarity(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2,
-      const DoubleVal& scaling_factor, const DoubleVal& boost_threshold) {
+    const StringVal& s1, const StringVal& s2,
+    const DoubleVal& scaling_factor, const DoubleVal& boost_threshold) {
 
   constexpr int MAX_PREFIX_LENGTH = 4;
   int s1len = s1.len;
@@ -1716,12 +1722,12 @@ DoubleVal StringFunctions::JaroWinklerSimilarity(FunctionContext* ctx,
     int common_length = std::min(MAX_PREFIX_LENGTH, std::min(s1len, s2len));
     int common_prefix = 0;
     while (common_prefix < common_length &&
-           s1.ptr[common_prefix] == s2.ptr[common_prefix]) {
+        s1.ptr[common_prefix] == s2.ptr[common_prefix]) {
       common_prefix++;
     }
 
     jaro_winkler_similarity += common_prefix * scaling_factor.val *
-      (1.0 - jaro_similarity.val);
+        (1.0 - jaro_similarity.val);
   }
   return DoubleVal(jaro_winkler_similarity);
 }
@@ -1784,8 +1790,8 @@ IntVal StringFunctions::DamerauLevenshtein(
         l_cost = 1;
       }
       d[i][j] = std::min(d[i - 1][j - 1] + l_cost, // substitution
-                         std::min(d[i][j - 1] + 1, // insertion
-                                  d[i - 1][j] + 1) // deletion
+          std::min(d[i][j - 1] + 1, // insertion
+              d[i - 1][j] + 1) // deletion
       );
       if (i > 1 && j > 1 && s1.ptr[i - 1] == s2.ptr[j - 2]
           && s1.ptr[i - 2] == s2.ptr[j - 1]) {
@@ -1798,5 +1804,64 @@ IntVal StringFunctions::DamerauLevenshtein(
   ctx->Free(reinterpret_cast<uint8_t*>(d));
   ctx->Free(reinterpret_cast<uint8_t*>(rows));
   return IntVal(result);
+}
+
+StringVal StringFunctions::aes_encrypt(FunctionContext* ctx,  const StringVal& expr, const StringVal&  key,
+    StringVal& mode1, const StringVal&  iv, const StringVal&  aad)
+{
+  // currently we only support 256-bit key length
+  if (key.len != 16 && key.len != 24 && key.len != 32) {
+    return StringVal::null();
+  }
+  impala::AES_CIPHER_MODE mode = impala::AES_CIPHER_MODE::AES_256_ECB;
+
+  EncryptionKey *t = new EncryptionKey();
+
+  t->SetCipherMode(mode);
+
+  t->InitializeFields(key.ptr, iv.ptr, aad.ptr);
+
+  int expected_out_len = expr.len;
+  
+  if (mode == impala::AES_CIPHER_MODE::AES_256_ECB)
+    expected_out_len += (16 - expr.len % 16);
+
+  uint8_t out[expected_out_len];
+
+  int len = expr.len;
+  int64_t* out_len;
+  Status st = t->Encrypt((uint8_t*)expr.ptr, len, out, out_len);
+
+  delete t;
+
+  StringVal result = StringVal::CopyFrom(ctx, out, *out_len);
+
+  return result;
+}
+
+StringVal StringFunctions::aes_decrypt(FunctionContext* ctx,  const StringVal& expr, const StringVal&  key,
+    AES_CIPHER_MODE mode, const StringVal&  iv, const StringVal&  aad)
+{
+  if (key.len != 16 && key.len != 24 && key.len != 32) {
+    return StringVal::null();
+  }
+
+  EncryptionKey *t = new EncryptionKey();
+
+  t->SetCipherMode(mode);
+
+  t->InitializeFields(key.ptr, iv.ptr, aad.ptr);
+
+  uint8_t out[100];
+
+  int len = expr.len;
+  int64_t* out_len;
+  Status st = t->Decrypt((uint8_t*)expr.ptr, len, out, out_len);
+
+  delete t;
+
+  StringVal result = StringVal::CopyFrom(ctx, out, *out_len);
+
+  return result;
 }
 }

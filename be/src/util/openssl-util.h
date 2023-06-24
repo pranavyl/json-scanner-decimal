@@ -22,7 +22,7 @@
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <openssl/ssl.h>
-
+#include "exprs/string-functions.h"
 #include "common/status.h"
 
 namespace impala {
@@ -69,10 +69,11 @@ inline bool IsFIPSMode() {
 #endif
 };
 
-enum AES_CIPHER_MODE {
+enum class AES_CIPHER_MODE {
   AES_256_CFB,
   AES_256_CTR,
-  AES_256_GCM
+  AES_256_GCM,
+  AES_256_ECB,
 };
 
 /// The hash of a data buffer used for checking integrity. A SHA256 hash is used
@@ -150,14 +151,14 @@ class EncryptionKey {
   /// Exactly 'len' bytes will be written to 'out'. This key must be initialized before
   /// calling. Operates in-place if 'in' == 'out', otherwise the buffers must not overlap.
   /// For GCM mode, the hash tag will be kept inside(gcm_tag_ variable).
-  Status Encrypt(const uint8_t* data, int64_t len, uint8_t* out) WARN_UNUSED_RESULT;
+  Status Encrypt(const uint8_t* data, int64_t len, uint8_t* out, int64_t* data_read = NULL) WARN_UNUSED_RESULT;
 
   /// Decrypts a buffer of input data 'data' of length 'len' that was encrypted with this
   /// key into an output buffer 'out'. Exactly 'len' bytes will be written to 'out'.
   /// This key must be initialized before calling. Operates in-place if 'in' == 'out',
   /// otherwise the buffers must not overlap. For GCM mode, the hash tag, which is
   /// computed during encryption, will be used for intgerity verification.
-  Status Decrypt(const uint8_t* data, int64_t len, uint8_t* out) WARN_UNUSED_RESULT;
+  Status Decrypt(const uint8_t* data, int64_t len, uint8_t* out, int64_t* data_read = NULL) WARN_UNUSED_RESULT;
 
   /// Specify a cipher mode. Currently used only for testing but maybe in future we
   /// can provide a configuration option for the end user who can choose a preferred
@@ -166,7 +167,11 @@ class EncryptionKey {
   void SetCipherMode(AES_CIPHER_MODE m);
 
   /// If is GCM mode at runtime
-  bool IsGcmMode() const { return mode_ == AES_256_GCM; }
+  bool IsGcmMode() const { return mode_ == impala::AES_CIPHER_MODE::AES_256_GCM; }
+
+  bool IsEcbMode() const { return mode_ == impala::AES_CIPHER_MODE::AES_256_ECB; }
+
+  void InitializeFields(const uint8_t* key, const uint8_t* iv, const uint8_t* aad);
 
   /// Returns the a default mode which is supported at runtime. If GCM mode
   /// is supported, return AES_256_GCM as the default. If GCM is not supported,
@@ -184,7 +189,7 @@ class EncryptionKey {
   /// This key must be initialized before calling. Operates in-place if 'in' == 'out',
   /// otherwise the buffers must not overlap.
   Status EncryptInternal(bool encrypt, const uint8_t* data, int64_t len,
-      uint8_t* out) WARN_UNUSED_RESULT;
+      uint8_t* out, int64_t* data_read) WARN_UNUSED_RESULT;
 
   /// Check if mode m is supported at runtime
   static bool IsModeSupported(AES_CIPHER_MODE m);

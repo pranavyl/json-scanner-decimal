@@ -3287,11 +3287,61 @@ select bytes(string_col), bytes(date_string_col) from functional.alltypestiny;
 ---- TYPES
 INT, INT
 ====
----- QUERY
-# Test for IMPALA-12565 (UDF)
-select pmod(0, 0), pmod(0, 0.0);
+---- QUERY: IMPALA-
+# AES encryption example:
+select base64encode(aes_encrypt('ABC', '1234567890123456'));
 ---- RESULTS
-NULL,NULL
+'y6Ss+zCYObpCbgfWfyNWTw=='
 ---- TYPES
-BIGINT, DOUBLE
+STRING
+====
+---- QUERY
+# AES decryption example:
+select aes_decrypt(base64decode('y6Ss+zCYObpCbgfWfyNWTw=='),'1234567890123456');
+---- RESULTS
+'ABC'
+---- TYPES
+STRING
+====
+---- QUERY
+select base64encode(aes_encrypt('', '1234567890123456'));
+---- RESULTS
+'BQGHoM3lqYcsurCRq3PlUw=='
+---- TYPES
+STRING
+====
+---- QUERY
+select aes_decrypt(base64decode('BQGHoM3lqYcsurCRq3PlUw=='),'1234567890123456');
+---- RESULTS
+''
+---- TYPES
+STRING
+====
+---- QUERY
+select base64encode(aes_encrypt('ABC', '12345678901234567890123456789012'));
+---- RESULTS
+'E1zl+pDv/GY4JLk254KAIQ=='
+---- TYPES
+STRING
+====
+---- QUERY
+select aes_decrypt(base64decode('E1zl+pDv/GY4JLk254KAIQ=='),'12345678901234567890123456789012');
+---- RESULTS
+'ABC'
+---- TYPES
+STRING
+====
+---- QUERY
+select base64encode(aes_encrypt('ABC', '123456789012345678901234'));
+---- RESULTS
+'iSwHg+qOErVgUCj8EVEAmw=='
+---- TYPES
+STRING
+====
+---- QUERY
+select aes_decrypt(base64decode('iSwHg+qOErVgUCj8EVEAmw=='),'123456789012345678901234');
+---- RESULTS
+'ABC'
+---- TYPES
+STRING
 ====

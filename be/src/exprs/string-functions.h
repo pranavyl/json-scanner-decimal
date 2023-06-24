@@ -24,6 +24,13 @@
 
 #include "runtime/string-value.h"
 #include "runtime/string-search.h"
+#include "util/openssl-util.h"
+#include <cstring>
+
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+
+#include <string>
 
 using namespace impala_udf;
 
@@ -42,6 +49,7 @@ using impala_udf::TimestampVal;
 using impala_udf::StringVal;
 using impala_udf::DecimalVal;
 
+enum class AES_CIPHER_MODE;
 class Expr;
 class OpcodeRegistry;
 class TupleRow;
@@ -102,6 +110,11 @@ class StringFunctions {
   /// Cleans up the work done by TrimPrepare above.
   static void TrimClose(FunctionContext*, FunctionContext::FunctionStateScope);
 
+  /// Support for AES encryption functions in impala, using ECB mode.
+  static StringVal aes_encrypt(FunctionContext*, const StringVal& expr,
+      const StringVal&  key, const StringVal& mode, const StringVal&  iv, const StringVal&  aad);
+  static StringVal aes_decrypt(FunctionContext*, const StringVal& expr,
+      const StringVal&  key, AES_CIPHER_MODE mode, const StringVal&  iv, const StringVal&  aad);
   /// Trims occurrences of the characters in 'chars_to_trim' string from
   /// the beginning of string 'str'.
   static StringVal LTrimString(FunctionContext* ctx, const StringVal& str,
