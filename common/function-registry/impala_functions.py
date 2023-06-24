@@ -522,6 +522,13 @@ visible_functions = [
   [['ai_generate_text_default'], 'STRING', ['STRING'],
    'impala::AiFunctions::AiGenerateTextDefault'],
   [['bytes'], 'INT', ['STRING'], 'impala::StringFunctions::Bytes'],
+
+  [['aes_encrypt'], 'STRING', ['STRING', 'STRING', 'STRING', 'STRING'], 'impala::StringFunctions::aes_encrypt',
+   '_ZN6impala15StringFunctions11aes_prepareEPN10impala_udf15FunctionContextENS2_18FunctionStateScopeE',
+   '_ZN6impala15StringFunctions9aes_closeEPN10impala_udf15FunctionContextENS2_18FunctionStateScopeE'],
+  [['aes_decrypt'], 'STRING', ['STRING', 'STRING', 'STRING', 'STRING'], 'impala::StringFunctions::aes_decrypt',
+   '_ZN6impala15StringFunctions11aes_prepareEPN10impala_udf15FunctionContextENS2_18FunctionStateScopeE',
+   '_ZN6impala15StringFunctions9aes_closeEPN10impala_udf15FunctionContextENS2_18FunctionStateScopeE'],
   [['length'], 'INT', ['STRING'], 'impala::StringFunctions::Length'],
   [['length'], 'INT', ['BINARY'], 'impala::StringFunctions::Bytes'],
   [['length'], 'INT', ['CHAR'], 'impala::StringFunctions::CharLength'],

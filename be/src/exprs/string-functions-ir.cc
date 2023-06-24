@@ -19,7 +19,10 @@
 
 #include <cctype>
 #include <numeric>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
 #include <stdint.h>
+#include <string>
 #include <re2/re2.h>
 #include <re2/stringpiece.h>
 
@@ -27,13 +30,15 @@
 
 #include "exprs/anyval-util.h"
 #include "exprs/scalar-expr.h"
-#include "gen-cpp/Metrics_types.h"
 #include "gutil/strings/charset.h"
+#include "gutil/strings/stringpiece.h"
 #include "gutil/strings/substitute.h"
 #include "runtime/string-value.inline.h"
 #include "runtime/tuple-row.h"
+#include "udf/udf.h"
 #include "util/bit-util.h"
 #include "util/coding-util.h"
+#include "util/openssl-util.h"
 #include "util/pretty-printer.h"
 #include "util/string-util.h"
 #include "util/ubsan.h"
@@ -43,7 +48,6 @@
 
 using namespace impala_udf;
 using std::bitset;
-using std::any_of;
 
 // NOTE: be careful not to use string::append.  It is not performant.
 namespace impala {
@@ -57,9 +61,7 @@ uint64_t StringFunctions::re2_mem_limit_ = 8 << 20;
 //  - 1-indexed positions
 //  - supported negative positions (count from the end of the string)
 //  - [optional] len.  No len indicates longest substr possible
-// Marks as IR_ALWAYS_INLINE since this is called in other overloads.
-// So the overloads can also replace GetConstFnAttr() calls in codegen.
-IR_ALWAYS_INLINE StringVal StringFunctions::Substring(FunctionContext* context,
+StringVal StringFunctions::Substring(FunctionContext* context,
     const StringVal& str, const BigIntVal& pos, const BigIntVal& len) {
   if (str.is_null || pos.is_null || len.is_null) return StringVal::null();
   if (context->impl()->GetConstFnAttr(FunctionContextImpl::UTF8_MODE)) {
@@ -155,8 +157,8 @@ StringVal StringFunctions::Space(FunctionContext* context, const BigIntVal& len)
   if (len.val <= 0) return StringVal();
   if (len.val > StringVal::MAX_LENGTH) {
     context->SetError(Substitute(ERROR_CHARACTER_LIMIT_EXCEEDED,
-         "space() result",
-         PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
+        "space() result",
+        PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
     return StringVal::null();
   }
   StringVal result(context, len.val);
@@ -259,7 +261,7 @@ StringVal StringFunctions::Rpad(FunctionContext* context, const StringVal& str,
 
 IntVal StringFunctions::Length(FunctionContext* context, const StringVal& str) {
   if (str.is_null) return IntVal::null();
-  if (context->impl()->GetConstFnAttr(FunctionContextImpl::UTF8_MODE)) {
+  if (context->impl()->GetConstFnAttr(FunctionContextImpl::UTF8_MODE, 0)) {
     return Utf8Length(context, str);
   }
   return IntVal(str.len);
@@ -290,10 +292,7 @@ IntVal StringFunctions::Utf8Length(FunctionContext* context, const StringVal& st
   return IntVal(CountUtf8Chars(str.ptr, str.len));
 }
 
-// Marks as IR_ALWAYS_INLINE since this is called in MaskFunctions::MaskHash().
-// So the caller can also replace GetConstFnAttr() calls in codegen.
-IR_ALWAYS_INLINE StringVal StringFunctions::Lower(FunctionContext* context,
-    const StringVal& str) {
+StringVal StringFunctions::Lower(FunctionContext* context, const StringVal& str) {
   if (str.is_null) return StringVal::null();
   if (context->impl()->GetConstFnAttr(FunctionContextImpl::UTF8_MODE)) {
     return LowerUtf8(context, str);
@@ -697,90 +696,35 @@ StringVal StringFunctions::Translate(FunctionContext* context, const StringVal& 
   return result;
 }
 
-void StringFunctions::TrimContext::Reset(const StringVal& chars_to_trim) {
-  single_byte_chars_.reset();
-  double_byte_chars_.clear();
-  triple_byte_chars_.clear();
-  quadruple_byte_chars_.clear();
-
-  if (!utf8_mode_) {
-    for (size_t i = 0; i < chars_to_trim.len; ++i) {
-      single_byte_chars_.set(chars_to_trim.ptr[i], true);
-    }
-    return;
-  }
-
-  for (size_t i = 0, char_size = 0; i < chars_to_trim.len; i += char_size) {
-    char_size = BitUtil::NumBytesInUtf8Encoding(chars_to_trim.ptr[i]);
-
-    // If the remaining number of bytes does not match the number of bytes specified by
-    // the UTF-8 character, we may have encountered an illegal UTF-8 character.
-    // In order to prevent subsequent data access from going out of bounds, restrictions
-    // are placed here to ensure that accessing pointers to multi-byte characters is
-    // always safe.
-    if (UNLIKELY(i + char_size > chars_to_trim.len)) {
-      char_size = chars_to_trim.len - i;
-    }
-
-    switch (char_size) {
-      case 1: single_byte_chars_.set(chars_to_trim.ptr[i], true); break;
-      case 2: double_byte_chars_.push_back(&chars_to_trim.ptr[i]); break;
-      case 3: triple_byte_chars_.push_back(&chars_to_trim.ptr[i]); break;
-      case 4: quadruple_byte_chars_.push_back(&chars_to_trim.ptr[i]); break;
-      default: DCHECK(false); break;
-    }
-  }
-}
-
-bool StringFunctions::TrimContext::Contains(const uint8_t* utf8_char, int len) const {
-  auto eq = [&](const uint8_t* c){ return memcmp(c, utf8_char, len) == 0; };
-  switch (len) {
-    case 1: return single_byte_chars_.test(*utf8_char);
-    case 2: return any_of(double_byte_chars_.begin(), double_byte_chars_.end(), eq);
-    case 3: return any_of(triple_byte_chars_.begin(), triple_byte_chars_.end(), eq);
-    case 4: return any_of(quadruple_byte_chars_.begin(), quadruple_byte_chars_.end(), eq);
-    default: DCHECK(false); return false;
-  }
-}
-
-void StringFunctions::TrimPrepare(FunctionContext* context,
-    FunctionContext::FunctionStateScope scope) {
-  bool utf8_mode = context->impl()->GetConstFnAttr(FunctionContextImpl::UTF8_MODE);
-  DoTrimPrepare(context, scope, utf8_mode);
-}
-
-void StringFunctions::Utf8TrimPrepare(FunctionContext* context,
-    FunctionContext::FunctionStateScope scope) {
-  DoTrimPrepare(context, scope, true /* utf8_mode */);
-}
-
-void StringFunctions::DoTrimPrepare(FunctionContext* context,
-    FunctionContext::FunctionStateScope scope, bool utf8_mode) {
+void StringFunctions::TrimPrepare(
+    FunctionContext* context, FunctionContext::FunctionStateScope scope) {
   if (scope != FunctionContext::THREAD_LOCAL) return;
-  TrimContext* trim_ctx = new TrimContext(utf8_mode);
-  context->SetFunctionState(scope, trim_ctx);
-
+  // Create a bitset to hold the unique characters to trim.
+  bitset<256>* unique_chars = new bitset<256>();
+  context->SetFunctionState(scope, unique_chars);
   // If the caller didn't specify the set of characters to trim, it means
   // that we're only trimming whitespace. Return early in that case.
   // There can be either 1 or 2 arguments.
   DCHECK(context->GetNumArgs() == 1 || context->GetNumArgs() == 2);
   if (context->GetNumArgs() == 1) {
-    trim_ctx->Reset(StringVal(" "));
+    unique_chars->set(static_cast<int>(' '), true);
     return;
   }
   if (!context->IsArgConstant(1)) return;
   DCHECK_EQ(context->GetArgType(1)->type, FunctionContext::TYPE_STRING);
   StringVal* chars_to_trim = reinterpret_cast<StringVal*>(context->GetConstantArg(1));
   if (chars_to_trim->is_null) return; // We shouldn't peek into Null StringVals
-  trim_ctx->Reset(*chars_to_trim);
+  for (int32_t i = 0; i < chars_to_trim->len; ++i) {
+    unique_chars->set(static_cast<int>(chars_to_trim->ptr[i]), true);
+  }
 }
 
 void StringFunctions::TrimClose(
     FunctionContext* context, FunctionContext::FunctionStateScope scope) {
   if (scope != FunctionContext::THREAD_LOCAL) return;
-  TrimContext* trim_ctx =
-      reinterpret_cast<TrimContext*>(context->GetFunctionState(scope));
-  delete trim_ctx;
+  bitset<256>* unique_chars = reinterpret_cast<bitset<256>*>(
+      context->GetFunctionState(scope));
+  delete unique_chars;
   context->SetFunctionState(scope, nullptr);
 }
 
@@ -788,67 +732,34 @@ template <StringFunctions::TrimPosition D, bool IS_IMPLICIT_WHITESPACE>
 StringVal StringFunctions::DoTrimString(FunctionContext* ctx,
     const StringVal& str, const StringVal& chars_to_trim) {
   if (str.is_null) return StringVal::null();
-  TrimContext* trim_ctx = reinterpret_cast<TrimContext*>(
+  bitset<256>* unique_chars = reinterpret_cast<bitset<256>*>(
       ctx->GetFunctionState(FunctionContext::THREAD_LOCAL));
-
-  // When 'chars_to_trim' is not a constant, we need to reset TrimContext with new
-  // 'chars_to_trim'.
+  // When 'chars_to_trim' is unique for each element (e.g. when 'chars_to_trim'
+  // is each element of a table column), we need to prepare a bitset of unique
+  // characters here instead of using the bitset from function context.
   if (!IS_IMPLICIT_WHITESPACE && !ctx->IsArgConstant(1)) {
     if (chars_to_trim.is_null) return str;
-    trim_ctx->Reset(chars_to_trim);
+    unique_chars->reset();
+    for (int32_t i = 0; i < chars_to_trim.len; ++i) {
+      unique_chars->set(static_cast<int>(chars_to_trim.ptr[i]), true);
+    }
   }
-
-  // When dealing with UTF-8 characters in UTF-8 mode, use DoUtf8TrimString().
-  if (trim_ctx->utf8_mode()) {
-    return DoUtf8TrimString<D>(str, *trim_ctx);
-  }
-
-  // Otherwise, we continue to maintain the old behavior.
+  // Find new starting position.
   int32_t begin = 0;
   int32_t end = str.len - 1;
-  // Find new starting position.
-  if constexpr (D == LEADING || D == BOTH) {
-    while (begin < str.len && trim_ctx->Contains(str.ptr[begin])) {
+  if (D == LEADING || D == BOTH) {
+    while (begin < str.len &&
+        unique_chars->test(static_cast<int>(str.ptr[begin]))) {
       ++begin;
     }
   }
   // Find new ending position.
-  if constexpr (D == TRAILING || D == BOTH) {
-    while (end >= begin && trim_ctx->Contains(str.ptr[end])) {
+  if (D == TRAILING || D == BOTH) {
+    while (end >= begin && unique_chars->test(static_cast<int>(str.ptr[end]))) {
       --end;
     }
   }
   return StringVal(str.ptr + begin, end - begin + 1);
-}
-
-template <StringFunctions::TrimPosition D>
-StringVal StringFunctions::DoUtf8TrimString(const StringVal& str,
-    const TrimContext& trim_ctx) {
-  if (UNLIKELY(str.len == 0)) return str;
-
-  const uint8_t* begin = str.ptr;
-  const uint8_t* end = begin + str.len;
-  // Find new starting position.
-  if constexpr (D == LEADING || D == BOTH) {
-    while (begin < end) {
-      size_t char_size = BitUtil::NumBytesInUtf8Encoding(*begin);
-      if (UNLIKELY(begin + char_size > end)) char_size = end - begin;
-      if (!trim_ctx.Contains(begin, char_size)) break;
-      begin += char_size;
-    }
-  }
-  // Find new ending position.
-  if constexpr (D == TRAILING || D == BOTH) {
-    while (begin < end) {
-      int char_index = FindUtf8PosBackward(begin, end - begin, 0);
-      DCHECK_NE(char_index, -1);
-      const uint8_t* char_begin = begin + char_index;
-      if (!trim_ctx.Contains(char_begin, end - char_begin)) break;
-      end = char_begin;
-    }
-  }
-
-  return StringVal(const_cast<uint8_t*>(begin), end - begin);
 }
 
 StringVal StringFunctions::Trim(FunctionContext* context, const StringVal& str) {
@@ -884,10 +795,8 @@ IntVal StringFunctions::Ascii(FunctionContext* context, const StringVal& str) {
   return IntVal((str.len == 0) ? 0 : static_cast<int32_t>(str.ptr[0]));
 }
 
-// Marks as IR_ALWAYS_INLINE since this is called in other overloads.
-// So the overloads can also replace GetConstFnAttr() calls in codegen.
-IR_ALWAYS_INLINE IntVal StringFunctions::Instr(FunctionContext* context,
-    const StringVal& str, const StringVal& substr, const BigIntVal& start_position,
+IntVal StringFunctions::Instr(FunctionContext* context, const StringVal& str,
+    const StringVal& substr, const BigIntVal& start_position,
     const BigIntVal& occurrence) {
   if (str.is_null || substr.is_null || start_position.is_null || occurrence.is_null) {
     return IntVal::null();
@@ -1255,8 +1164,8 @@ StringVal StringFunctions::Concat(
 
   if (total_size > StringVal::MAX_LENGTH) {
     context->SetError(Substitute(ERROR_CHARACTER_LIMIT_EXCEEDED,
-         "Concatenated string length",
-         PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
+        "Concatenated string length",
+        PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
     return StringVal::null();
   }
 
@@ -1303,8 +1212,8 @@ StringVal StringFunctions::ConcatWs(FunctionContext* context, const StringVal& s
 
   if (total_size > StringVal::MAX_LENGTH) {
     context->SetError(Substitute(ERROR_CHARACTER_LIMIT_EXCEEDED,
-         "Concatenated string length",
-         PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
+        "Concatenated string length",
+        PrettyPrinter::Print(StringVal::MAX_LENGTH, TUnit::BYTES)).c_str());
     return StringVal::null();
   }
 
@@ -1435,7 +1344,7 @@ StringVal StringFunctions::ParseUrlKey(FunctionContext* ctx, const StringVal& ur
 
   StringValue result;
   if (!UrlParser::ParseUrlKey(StringValue::FromStringVal(url), url_part,
-                              StringValue::FromStringVal(key), &result)) {
+      StringValue::FromStringVal(key), &result)) {
     // url is malformed, or url_part is invalid.
     if (url_part == UrlParser::INVALID) {
       stringstream ss;
@@ -1715,8 +1624,8 @@ DoubleVal StringFunctions::JaroSimilarity(
   }
   double m = static_cast<double>(matching_characters);
   double jaro_similarity = 1.0 / 3.0  * ( m / static_cast<double>(s1len)
-                                        + m / static_cast<double>(s2len)
-                                        + (m - transpositions) / m );
+      + m / static_cast<double>(s2len)
+      + (m - transpositions) / m );
 
   ctx->Free(reinterpret_cast<uint8_t*>(s1_matching));
   ctx->Free(reinterpret_cast<uint8_t*>(s2_matching));
@@ -1734,27 +1643,27 @@ DoubleVal StringFunctions::JaroDistance(
 }
 
 DoubleVal StringFunctions::JaroWinklerDistance(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2) {
+    const StringVal& s1, const StringVal& s2) {
   return StringFunctions::JaroWinklerDistance(ctx, s1, s2,
-    DoubleVal(0.1), DoubleVal(0.7));
+      DoubleVal(0.1), DoubleVal(0.7));
 }
 
 DoubleVal StringFunctions::JaroWinklerDistance(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2,
-      const DoubleVal& scaling_factor) {
+    const StringVal& s1, const StringVal& s2,
+    const DoubleVal& scaling_factor) {
   return StringFunctions::JaroWinklerDistance(ctx, s1, s2,
-    scaling_factor, DoubleVal(0.7));
+      scaling_factor, DoubleVal(0.7));
 }
 
 // Based on https://en.wikipedia.org/wiki/Jaro%E2%80%93Winkler_distance
 // Implements Jaro-Winkler distance
 // Extended with boost_theshold: Winkler's modification only applies if Jaro exceeds it
 DoubleVal StringFunctions::JaroWinklerDistance(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2,
-      const DoubleVal& scaling_factor, const DoubleVal& boost_threshold) {
+    const StringVal& s1, const StringVal& s2,
+    const DoubleVal& scaling_factor, const DoubleVal& boost_threshold) {
 
   DoubleVal jaro_winkler_similarity = StringFunctions::JaroWinklerSimilarity(
-    ctx, s1, s2, scaling_factor, boost_threshold);
+      ctx, s1, s2, scaling_factor, boost_threshold);
 
   if (jaro_winkler_similarity.is_null) return DoubleVal::null();
   if (jaro_winkler_similarity.val == -1.0) return DoubleVal(-1.0);
@@ -1762,24 +1671,24 @@ DoubleVal StringFunctions::JaroWinklerDistance(FunctionContext* ctx,
 }
 
 DoubleVal StringFunctions::JaroWinklerSimilarity(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2) {
+    const StringVal& s1, const StringVal& s2) {
   return StringFunctions::JaroWinklerSimilarity(ctx, s1, s2,
-    DoubleVal(0.1), DoubleVal(0.7));
+      DoubleVal(0.1), DoubleVal(0.7));
 }
 
 DoubleVal StringFunctions::JaroWinklerSimilarity(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2,
-      const DoubleVal& scaling_factor) {
+    const StringVal& s1, const StringVal& s2,
+    const DoubleVal& scaling_factor) {
   return StringFunctions::JaroWinklerSimilarity(ctx, s1, s2,
-    scaling_factor, DoubleVal(0.7));
+      scaling_factor, DoubleVal(0.7));
 }
 
 // Based on https://en.wikipedia.org/wiki/Jaro%E2%80%93Winkler_distance
 // Implements Jaro-Winkler similarity
 // Extended with boost_theshold: Winkler's modification only applies if Jaro exceeds it
 DoubleVal StringFunctions::JaroWinklerSimilarity(FunctionContext* ctx,
-      const StringVal& s1, const StringVal& s2,
-      const DoubleVal& scaling_factor, const DoubleVal& boost_threshold) {
+    const StringVal& s1, const StringVal& s2,
+    const DoubleVal& scaling_factor, const DoubleVal& boost_threshold) {
 
   constexpr int MAX_PREFIX_LENGTH = 4;
   int s1len = s1.len;
@@ -1813,12 +1722,12 @@ DoubleVal StringFunctions::JaroWinklerSimilarity(FunctionContext* ctx,
     int common_length = std::min(MAX_PREFIX_LENGTH, std::min(s1len, s2len));
     int common_prefix = 0;
     while (common_prefix < common_length &&
-           s1.ptr[common_prefix] == s2.ptr[common_prefix]) {
+        s1.ptr[common_prefix] == s2.ptr[common_prefix]) {
       common_prefix++;
     }
 
     jaro_winkler_similarity += common_prefix * scaling_factor.val *
-      (1.0 - jaro_similarity.val);
+        (1.0 - jaro_similarity.val);
   }
   return DoubleVal(jaro_winkler_similarity);
 }
@@ -1881,8 +1790,8 @@ IntVal StringFunctions::DamerauLevenshtein(
         l_cost = 1;
       }
       d[i][j] = std::min(d[i - 1][j - 1] + l_cost, // substitution
-                         std::min(d[i][j - 1] + 1, // insertion
-                                  d[i - 1][j] + 1) // deletion
+          std::min(d[i][j - 1] + 1, // insertion
+              d[i - 1][j] + 1) // deletion
       );
       if (i > 1 && j > 1 && s1.ptr[i - 1] == s2.ptr[j - 2]
           && s1.ptr[i - 2] == s2.ptr[j - 1]) {
@@ -1897,41 +1806,196 @@ IntVal StringFunctions::DamerauLevenshtein(
   return IntVal(result);
 }
 
-template <typename T>
-static StringVal prettyPrint(FunctionContext* context, const T& int_val,
-    const TUnit::type& unit) {
-  if (int_val.is_null) {
+// Initializes the EncryptionKey for AES Encryption/ Decryption by validating arguments.
+Status InitializeEncryptionKey(FunctionContext* ctx, const StringVal& expr,
+    const StringVal& key, const StringVal& mode, const StringVal& iv, bool is_encrypt,
+    EncryptionKey &encryption_key) {
+
+    if (expr.is_null) {
+      ctx->SetError("Expression cannot be NULL.");
+    }
+
+    if (key.is_null) {
+      ctx->SetError("Key cannot be NULL.");
+    }
+
+    if (key.len != 16 && key.len != 32) {
+      ctx->SetError("AES only supports 128 and 256 bit key lengths.");
+    }
+
+    AES_CIPHER_MODE cipher_mode;
+    // If user passed a "NULL" field in mode, default AES encryption mode is chosen.
+    if (mode.is_null) {
+      cipher_mode = EncryptionKey::GetSupportedDefaultMode();
+      bool* state = reinterpret_cast<bool*>(
+          ctx->GetFunctionState(FunctionContext::FRAGMENT_LOCAL));
+      if (!*state) {
+        VLOG_QUERY <<  "No AES mode was specified by user. Using " <<
+            EncryptionKey::ModeToString(cipher_mode) << " mode as default.";
+        *state = true;
+      }
+    } else {
+         cipher_mode = EncryptionKey::StringToMode
+             (std::string_view(reinterpret_cast<const char*>(mode.ptr),
+              mode.len));
+    }
+
+    if (cipher_mode == AES_CIPHER_MODE::INVALID) {
+      ctx->SetError(Substitute("Invalid AES 'mode': $0", StringPiece
+          (reinterpret_cast<const char*>(mode.ptr), mode.len)).c_str());
+    }
+
+    // ECB mode is not supported for Encryption.
+    if (is_encrypt && encryption_key.IsEcbMode()) {
+      ctx->SetError("ECB mode is not supported for encryption.");
+    }
+
+    // Check if iv is null in case of non ECB modes.
+    if (!encryption_key.IsEcbMode() && iv.is_null) {
+      ctx->SetError(Substitute("IV vector required for $0 mode",
+        EncryptionKey::ModeToString(cipher_mode)).c_str());
+    }
+
+    // Check if IV vector size is valid (<= AES_BLOCK_SIZE) in case of non ECB modes.
+    if (!encryption_key.IsEcbMode() && iv.len > AES_BLOCK_SIZE) {
+      ctx->SetError("IV vector size is greater than 16 bytes.");
+    }
+
+    // Initialize key and IV.
+    Status status = encryption_key.InitializeFields(key.ptr, key.len,
+        iv.ptr, iv.len, cipher_mode);
+
+    if (!status.ok()) {
+      ctx->SetError(status.msg().msg().data());
+    }
+    return Status::OK();
+}
+
+void StringFunctions::aes_prepare(FunctionContext* context,
+    FunctionContext::FunctionStateScope scope) {
+  if (scope != FunctionContext::FRAGMENT_LOCAL) return;
+  bool* state = new bool(false);
+  context->SetFunctionState(scope, state);
+}
+
+void StringFunctions::aes_close(FunctionContext* context,
+    FunctionContext::FunctionStateScope scope) {
+  if (scope != FunctionContext::FRAGMENT_LOCAL) return;
+  bool* state = reinterpret_cast<bool*>(
+      context->GetFunctionState(FunctionContext::FRAGMENT_LOCAL));
+  if (state != nullptr) {
+    context->Free(reinterpret_cast<uint8_t*>(state));
+    context->SetFunctionState(scope, nullptr);
+  }
+}
+// An entrypoint to perform AES decryption on a given expression string.
+// GCM mode expects expression, key, AES mode and iv vector.
+// CTR and CFB modes expect expression, key, AES mode and iv vector.
+// ECB mode expects expression, key, AES mode.
+// If a particular mode passed by user is not supported then the default
+// mode is chosen.
+//
+// Description of the modes supported:
+// AES-GCM (Advanced Encryption Standard Galois/Counter Mode) is a mode of operation
+// for symmetric key cryptographic block ciphers. It combines the AES block cipher
+// with the Galois/Counter Mode (GCM) operation for authenticated encryption.
+// AES-GCM provides both confidentiality and integrity, making it suitable for secure
+// communication and storage. Due to its security features and efficiency,
+// AES-GCM is chosen as the default choice for the current implementation.
+//
+// AES-ECB (Electronic Codebook) mode is a basic mode of operation for the AES
+// block cipher. In ECB mode, each block of plaintext is encrypted independently with
+// the same key, resulting in identical plaintext blocks producing identical ciphertext
+// blocks. It is included for bringing compatibility with legacy systems.
+// NOTE: This mode is only supported for decryption.
+//
+// CTR Mode:
+// AES-CTR (Counter) mode is a mode of operation for block ciphers that turns a block
+// cipher into a stream cipher. It works by encrypting a counter value to produce a
+// stream of key material, which is then XORed with the plaintext to produce the
+// ciphertext. CTR mode offers parallel encryption and decryption.
+//
+// CFB Mode:
+// AES-CFB (Cipher Feedback) mode is another mode of operation for block ciphers, where
+// ciphertext feedback is used to create a stream of key material. It operates on a
+// block-by-block basis, where the previous ciphertext block is encrypted and then XORed
+// with the plaintext to produce the next ciphertext block.
+StringVal StringFunctions::aes_decrypt(FunctionContext* ctx, const StringVal& expr,
+    const StringVal& key, const StringVal& mode, const StringVal& iv) {
+
+  EncryptionKey encryption_key;
+  Status status = InitializeEncryptionKey(ctx, expr, key, mode, iv, false,
+      encryption_key);
+  if (!status.ok()) {
     return StringVal::null();
   }
+  int64_t len = expr.len;
 
-  const string& fmt_str = PrettyPrinter::Print(int_val.val, unit);
+  // Remove spaces and set value of gcm_tag in case of GCM mode
+  if (encryption_key.IsGcmMode()) {
+    len -= AES_BLOCK_SIZE;
+    encryption_key.SetGcmTag(expr.ptr + len);
+  }
 
-  StringVal result(context, fmt_str.size());
-  if (UNLIKELY(result.is_null)) return StringVal::null();
-  uint8_t* ptr = result.ptr;
-  memcpy(ptr, fmt_str.c_str(), fmt_str.size());
+  StringVal result = StringVal(ctx, len);
 
+  // Decrypt the input
+  int64_t out_len = 0;
+  status = encryption_key.Decrypt(expr.ptr, len, result.ptr, &out_len);
+  if (!status.ok()) {
+    ctx->SetError("AES decryption failed");
+    return StringVal::null();
+  }
+  const int64_t len_diff = result.len - out_len;
+  DCHECK(len_diff == 0 || (encryption_key.IsEcbMode() && 0 < len_diff &&
+      len_diff <= AES_BLOCK_SIZE));
+  result.len = out_len;
   return result;
 }
 
-StringVal StringFunctions::PrettyPrintMemory(FunctionContext* context,
-    const BigIntVal& bytes) {
-  return prettyPrint(context, bytes, TUnit::BYTES);
-}
+// An entrypoint to perform AES encryption on a given expression string.
+// GCM mode expects expression, key, AES mode and iv vector.
+// CTR and CFB modes expects expression, key, AES mode and iv vector.
+// If a particular mode passed by user is not supported then an error is thrown.
+StringVal StringFunctions::aes_encrypt(FunctionContext* ctx, const StringVal& expr,
+    const StringVal& key, const StringVal& mode, const StringVal& iv) {
 
-StringVal StringFunctions::PrettyPrintMemory(FunctionContext* context,
-    const IntVal& bytes) {
-  return prettyPrint(context, bytes, TUnit::BYTES);
-}
+  EncryptionKey encryption_key;
+  Status status = InitializeEncryptionKey(ctx, expr, key, mode, iv, true,
+      encryption_key);
+  if (!status.ok()) {
+    return StringVal::null();
+  }
 
-StringVal StringFunctions::PrettyPrintMemory(FunctionContext* context,
-    const SmallIntVal& bytes) {
-  return prettyPrint(context, bytes, TUnit::BYTES);
-}
+  // Calculate expected output length
+  int expected_out_len = expr.len;
 
-StringVal StringFunctions::PrettyPrintMemory(FunctionContext* context,
-    const TinyIntVal& bytes) {
-  return prettyPrint(context, bytes, TUnit::BYTES);
-}
+  // Append space for gcm_tag in case of GCM mode
+  if (encryption_key.IsGcmMode()) {
+    expected_out_len += AES_BLOCK_SIZE;
+  }
 
+  // Allocate buffer for output
+  StringVal result = StringVal(ctx, expected_out_len);
+
+  // Encrypt the input
+  int64_t out_len = 0;
+  status = encryption_key.Encrypt(expr.ptr, expr.len, result.ptr,
+      &out_len);
+  if (!status.ok()) {
+    ctx->SetError("AES encryption failed.");
+    return StringVal::null();
+  }
+
+  // Append gcm_tag to encrypted buffer
+  if (encryption_key.IsGcmMode()) {
+    encryption_key.GetGcmTag(result.ptr + out_len);
+    out_len += AES_BLOCK_SIZE;
+  }
+
+  // Ensure expected output length matches actual output length
+  DCHECK_EQ(expected_out_len, out_len);
+
+  return result;
+}
 }
