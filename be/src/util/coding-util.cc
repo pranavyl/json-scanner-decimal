@@ -21,9 +21,15 @@
 #include <limits>
 #include <sstream>
 
-#include <boost/algorithm/string/classification.hpp>
+#include <string>
+#include <unordered_map>
 #include <boost/function.hpp>
 #include <sasl/sasl.h>
+#include <boost/algorithm/string.hpp>
+#include <iomanip> // Add this include for setw and setfill
+
+
+
 
 #include "common/compiler-util.h"
 #include "common/logging.h"
@@ -37,35 +43,56 @@ using std::uppercase;
 
 namespace impala {
 
-// Hive selectively encodes characters. This is the whitelist of
-// characters it will encode.
-// See common/src/java/org/apache/hadoop/hive/common/FileUtils.java
-// in the Hive source code for the source of this list.
-static function<bool (char)> HiveShouldEscape = is_any_of("\"#%\\*/:=?\u00FF");
 
 // It is more convenient to maintain the complement of the set of
 // characters to escape when not in Hive-compat mode.
 static function<bool (char)> ShouldNotEscape = is_any_of("-_.~");
 
-static inline void UrlEncode(const char* in, int in_len, string* out, bool hive_compat) {
-  (*out).reserve(in_len);
-  stringstream ss;
+// Mapping of special characters to their URL-encoded forms
+std::unordered_map<char, std::string> specialCharacterMap = {
+    {'"', "%22"},
+    {'#', "%23"},
+    {'\\', "%5C"},
+    {'*', "%2A"},
+    {'/', "%2F"},
+    {':', "%3A"},
+    {'=', "%3D"},
+    {'?', "%3F"},
+    {'\xFF', "%C3%BF"}, // Example for the Unicode character '\u00FF'
+    {'%', "%25"}
+};
+
+static inline void UrlEncode(const char* in, int in_len, std::string* out, bool hive_compat) {
+  (*out).clear();  // Clear the existing content to start fresh
+
+  std::stringstream ss;
   for (int i = 0; i < in_len; ++i) {
     const char ch = in[i];
-    // Escape the character iff a) we are in Hive-compat mode and the
-    // character is in the Hive whitelist or b) we are not in
-    // Hive-compat mode, and the character is not alphanumeric or one
-    // of the four commonly excluded characters.
-    if ((hive_compat && HiveShouldEscape(ch)) ||
-        (!hive_compat && !(isalnum(ch) || ShouldNotEscape(ch)))) {
-      ss << '%' << uppercase << hex << static_cast<uint32_t>(ch);
+    // Escape the character if:
+    // a) We are in Hive-compat mode and the character should be escaped according to specialCharacterMap
+    // b) We are not in Hive-compat mode and the character is not alphanumeric or one of the commonly excluded characters
+    if ((hive_compat && specialCharacterMap.find(ch) != specialCharacterMap.end()) ||
+        (!hive_compat && !(std::isalnum(ch) || ShouldNotEscape(ch)))) {
+      // If the character is in the specialCharacterMap, use its encoding
+      auto it = specialCharacterMap.find(ch);
+      if (it != specialCharacterMap.end()) {
+        ss << it->second;
+      } else {
+        // Otherwise, encode it as a hexadecimal
+        ss << '%' << std::uppercase << std::hex << static_cast<uint32_t>(ch);
+        // ss << boost::network::uri::encode(std::string(1, ch));
+
+      }
     } else {
       ss << ch;
     }
   }
-
+  // Fix the error in the encoded string
+  // Replace %25 with % if it was initially '%' in the input
   (*out) = ss.str();
+   // boost::replace_all(*out, "%25", "%");
 }
+
 
 void UrlEncode(const vector<uint8_t>& in, string* out, bool hive_compat) {
   if (in.empty()) {

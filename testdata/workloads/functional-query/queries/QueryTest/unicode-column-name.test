@@ -291,3 +291,33 @@ INT, STRING
 drop table testtbl_parquet;
 ---- RESULTS
 'Table has been dropped.'
+====
+====
+---- QUERY
+# Tests for IMPALA-11499
+create table my_part_tbl (id int) partitioned by (p string) stored as parquet;
+---- RESULTS
+'Table has been created.'
+====
+---- QUERY
+show tables;
+---- RESULTS
+'my_part_tbl'
+---- TYPES
+STRING
+====
+---- QUERY
+insert into my_part_tbl partition(p='运营业务数据') values (0);
+====
+---- QUERY
+insert into my_part_tbl partition(p='运') values (0);
+====
+---- QUERY
+select * from my_part_tbl;
+---- RESULTS: RAW_STRING
+0,'运'
+0,'运营业务数据'
+---- TYPES
+INT, STRING
+====
+
