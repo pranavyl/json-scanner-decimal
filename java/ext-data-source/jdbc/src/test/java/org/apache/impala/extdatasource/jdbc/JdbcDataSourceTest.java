@@ -54,12 +54,14 @@ public class JdbcDataSourceTest {
 
   private static final Logger LOG = LoggerFactory.getLogger(JdbcDataSourceTest.class);
 
-  private static String initString_ = "CACHE_CLASS::{\"database.type\":\"H2\", "
-      + "\"jdbc.url\":\"jdbc:h2:mem:test;MODE=MySQL;INIT=runscript from "
-      + "'classpath:test_script.sql'\", "
-      + "\"jdbc.driver\":\"org.h2.Driver\", "
-      + "\"table\":\"test_strategy\","
-      + "\"column.mapping\":\"id=strategy_id\"}";
+  private static String initString_ = "{\"database.type\":\"POSTGRES\", "
+   + "\"jdbc.url\":\"jdbc:postgresql://localhost:5432/functional\", "
+   + "\"jdbc.driver\":\"org.postgresql.Driver\", "
+   + "\"driver.url\":\"hdfs://localhost:20500/test-warehouse/data-sources/jdbc-drivers/postgresql-jdbc.jar\", "
+   + "\"dbcp.username\":\"hiveuser\", "
+   + "\"dbcp.password\":\"password\", "
+   + "\"table\":\"test_strategy\","
+   + "\"column.mapping\":\"id=strategy_id\"}";
 
   // Share data between tests
   private static JdbcDataSource jdbcDataSource_ = new JdbcDataSource();
@@ -135,7 +137,7 @@ public class JdbcDataSourceTest {
     unique_id.lo = 0x2020202020202020L;
     String str = "feedbeeff00d7777:2020202020202020";
     params.setQuery_id(unique_id);
-    params.setTable_name("test_strategy");
+    params.setTable_name("test_strategy1");
     params.setInit_string(initString_);
     schema_ = initSchema();
     params.setRow_schema(schema_);

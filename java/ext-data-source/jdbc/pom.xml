@@ -33,7 +33,7 @@
 
   <properties>
     <commons-dbcp2.version>2.9.0</commons-dbcp2.version>
-    <h2database.version>1.3.166</h2database.version>
+    <postgres.jdbc.version>${env.IMPALA_POSTGRES_JDBC_DRIVER_VERSION}</postgres.jdbc.version>
   </properties>
 
   <dependencies>
@@ -55,10 +55,10 @@
       <version>${commons-dbcp2.version}</version>
     </dependency>
     <dependency>
-      <groupId>com.h2database</groupId>
-      <artifactId>h2</artifactId>
-      <version>${h2database.version}</version>
-      <scope>test</scope>
+    <groupId>org.postgresql</groupId>
+    <artifactId>postgresql</artifactId>
+    <version>${postgres.jdbc.version}</version>
+    <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>junit</groupId>

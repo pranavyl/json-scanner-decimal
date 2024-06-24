@@ -34,10 +34,10 @@ hadoop fs -mkdir -p ${JDBC_DRIVERS_HDFS_PATH}
 
 # Copy libraries of external data sources to HDFS
 hadoop fs -put -f \
-  ${EXT_DATA_SOURCE_SRC_PATH}/test/target/impala-data-source-test-*.jar \
+  ${EXT_DATA_SOURCE_SRC_PATH}/test/target/impala-data-source-test-4.5.0-SNAPSHOT.jar \
   ${EXT_DATA_SOURCES_HDFS_PATH}/test-data-source.jar
 
-echo "Copied" ${EXT_DATA_SOURCE_SRC_PATH}/test/target/impala-data-source-test-*.jar \
+echo "Copied" ${EXT_DATA_SOURCE_SRC_PATH}/test/target/impala-data-source-test-4.5.0-SNAPSHOT.jar \
   "into HDFS" ${EXT_DATA_SOURCES_HDFS_PATH}
 
 # Copy Postgres JDBC driver to HDFS

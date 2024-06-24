@@ -20,6 +20,8 @@ package org.apache.impala.catalog;
 import com.google.common.base.Preconditions;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
@@ -117,8 +119,45 @@ public class TableLoader {
             "Unsupported table type '%s' for: %s", tableType, fullTblName));
       }
 
+      // Support for Hive JDBC storage handler
+      String val = msTbl.getParameters().get("storage_handler");
+      if (val != null && val.equals("org.apache.hive.storage.jdbc.JdbcStorageHandler")) {
+        Map<String, String> impala_tbl_props = new HashMap<>();
+        // Insert Impala specific JDBC storage handler properties
+        impala_tbl_props.put("__IMPALA_DATA_SOURCE_NAME", "impalajdbcdatasource");
+        val = msTbl.getParameters().get("hive.sql.database.type");
+        if (val != null) {
+          impala_tbl_props.put("database.type", val);
+        }
+        impala_tbl_props.put("driver.url", "/test-warehouse/data-sources/jdbc-drivers/postgresql-jdbc.jar");
+        val = msTbl.getParameters().get("hive.sql.dbcp.password");
+        if (val != null) {
+          impala_tbl_props.put("dbcp.password", val);
+        }
+        val = msTbl.getParameters().get("hive.sql.jdbc.url");
+        if (val != null) {
+          impala_tbl_props.put("jdbc.url", val);
+        }
+        val = msTbl.getParameters().get("hive.sql.dbcp.username");
+        if (val != null) {
+          impala_tbl_props.put("dbcp.username", val);
+        }
+        val = msTbl.getParameters().get("hive.sql.table");
+        if (val != null) {
+          impala_tbl_props.put("table", val);
+        }
+        val = msTbl.getParameters().get("hive.sql.jdbc.driver");
+        if (val != null) {
+          impala_tbl_props.put("jdbc.driver", val);
+        }
+        msTbl.unsetParameters();
+        msTbl.setParameters(impala_tbl_props);
+      }
+
       // Create a table of appropriate type and have it load itself
       table = Table.fromMetastoreTable(db, msTbl);
+      LOG.info("msTbl Properties begin here");
+      msTbl.getParameters().forEach((key, value) -> LOG.info(key + ": " + value));
       if (table == null) {
         throw new TableLoadingException(
             "Unrecognized table type for table: " + fullTblName);

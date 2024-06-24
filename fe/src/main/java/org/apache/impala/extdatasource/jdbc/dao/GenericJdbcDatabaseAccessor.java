@@ -333,13 +333,21 @@ public class GenericJdbcDatabaseAccessor implements DatabaseAccessor {
     // props.put("initialSize", "1");
     // 'maxActive' and 'maxWait' properties are renamed as 'maxTotal' and 'maxWaitMillis'
     // respectively in org.apache.commons.dbcp2.
-    props.put("maxTotal",
-        String.valueOf(BackendConfig.INSTANCE.getDbcpMaxConnPoolSize()));
-    props.put("maxIdle",
-        String.valueOf(BackendConfig.INSTANCE.getDbcpMaxConnPoolSize()));
-    props.put("minIdle", "0");
-    props.put("maxWaitMillis",
-        String.valueOf(BackendConfig.INSTANCE.getDbcpMaxWaitMillisForConn()));
+    if(BackendConfig.INSTANCE != null) {
+      props.put("maxTotal",
+              String.valueOf(BackendConfig.INSTANCE.getDbcpMaxConnPoolSize()));
+      props.put("maxIdle",
+              String.valueOf(BackendConfig.INSTANCE.getDbcpMaxConnPoolSize()));
+      props.put("minIdle", "0");
+      props.put("maxWaitMillis",
+              String.valueOf(BackendConfig.INSTANCE.getDbcpMaxWaitMillisForConn()));
+    }
+    else {
+      props.put("maxTotal", "3");
+      props.put("maxIdle", "3");
+      props.put("minIdle", "0");
+      props.put("maxWaitMillis", "10000");
+    }
     return props;
   }
 
