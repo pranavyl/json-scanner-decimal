@@ -295,7 +295,7 @@ public class JdbcDataSource implements ExternalDataSource {
     }
     return acceptedPredicates;
   }
-
+/*
   private void buildQueryAndExecute(TOpenParams params)
       throws JdbcDatabaseAccessException {
     Map<String, String> columnMapping = getColumnMapping(tableConfig_
@@ -338,7 +338,63 @@ public class JdbcDataSource implements ExternalDataSource {
       totalNumberOfRecords_ = dbAccessor_.getTotalNumberOfRecords(tableConfig_);
     }
   }
+*/
 
+  private void buildQueryAndExecute(TOpenParams params)
+          throws JdbcDatabaseAccessException {
+    Map<String, String> columnMapping = getColumnMapping(tableConfig_
+            .get(JdbcStorageConfig.COLUMN_MAPPING.getPropertyName()));
+
+    // Build query statement
+    String query;
+    String tableName = tableConfig_.get(JdbcStorageConfig.TABLE.getPropertyName());
+
+    if (tableName != null) { // Ensure 'table' property is not null
+      StringBuilder sb = new StringBuilder("SELECT ");
+      String project;
+      // If cols size equals to 0, it is 'select count(*) from tbl' statement.
+      if (schema_.getColsSize() == 0) {
+        project = "*";
+      } else {
+        project =
+                schema_.getCols().stream().map(
+                                TColumnDesc::getName).map(
+                                name -> columnMapping.getOrDefault(name, name))
+                        .collect(Collectors.joining(", "));
+      }
+      sb.append(project);
+      sb.append(" FROM ");
+
+      // Make jdbc table name to be quoted with double quotes if columnMapping is not empty
+      if (!columnMapping.isEmpty()) {
+        tableName = dbAccessor_.getCaseSensitiveName(tableName);
+      }
+      sb.append(tableName);
+
+      String condition = QueryConditionUtil
+              .buildCondition(params.getPredicates(), columnMapping, dbAccessor_);
+      if (StringUtils.isNotBlank(condition)) {
+        sb.append(" WHERE ").append(condition);
+      }
+
+      query = sb.toString();
+    } else {
+      // Use 'query' property if 'table' is null (fix applied)
+      query = tableConfig_.get(JdbcStorageConfig.QUERY.getPropertyName());
+    }
+
+    // Store the generated query
+    tableConfig_.set(JdbcStorageConfig.QUERY.getPropertyName(), query);
+    LOG.trace("JDBC Query: " + query);
+
+    if (schema_.getColsSize() != 0) {
+      int limit = -1;
+      if (params.isSetLimit()) limit = (int) params.getLimit();
+      iterator_ = dbAccessor_.getRecordIterator(tableConfig_, limit, 0);
+    } else {
+      totalNumberOfRecords_ = dbAccessor_.getTotalNumberOfRecords(tableConfig_);
+    }
+  }
   /*
    * Return Impala-to-X column mapping, or empty if it is not set.
    *

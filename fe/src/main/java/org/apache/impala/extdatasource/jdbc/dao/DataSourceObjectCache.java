@@ -104,23 +104,37 @@ public class DataSourceObjectCache {
 
       LOG.info("Datasource for '{}' was not cached. Loading now.", cacheKey);
       String driverUrl = props.getProperty("driverUrl");
-      try {
-        BasicDataSource dbcpDs = BasicDataSourceFactory.createDataSource(props);
-        // Copy jdbc driver to local file system.
-        String driverLocalPath = FileSystemUtil.copyFileFromUriToLocal(driverUrl);
-        // Create class loader for jdbc driver and set it for the
-        // BasicDataSource object so that the driver class could be loaded
-        // from jar file without searching classpath.
-        URL driverJarUrl = new File(driverLocalPath).toURI().toURL();
-        URLClassLoader driverLoader = URLClassLoader.newInstance(
-            new URL[] { driverJarUrl }, getClass().getClassLoader());
-        dbcpDs.setDriverClassLoader(driverLoader);
-        entry = new Entry(dbcpDs, driverLocalPath);
-        cacheMap_.put(cacheKey, entry);
-        return dbcpDs;
-      } catch (Exception e) {
-        throw new JdbcDatabaseAccessException(String.format(
-            "Unable to fetch jdbc driver jar from location '%s'. ", driverUrl));
+      if (Strings.isNullOrEmpty(driverUrl)) {
+        try {
+          BasicDataSource dbcpDs = BasicDataSourceFactory.createDataSource(props);
+          // Cache the datasource (no need to store driver path since it's in classpath)
+          entry = new Entry(dbcpDs, null);
+          cacheMap_.put(cacheKey, entry);
+          return dbcpDs;
+        } catch (Exception e) {
+             throw new JdbcDatabaseAccessException(
+                 "Unable to initialize datasource with system classloader");
+          }
+      }
+      else {
+        try {
+          BasicDataSource dbcpDs = BasicDataSourceFactory.createDataSource(props);
+          // Copy jdbc driver to local file system.
+          String driverLocalPath = FileSystemUtil.copyFileFromUriToLocal(driverUrl);
+          // Create class loader for jdbc driver and set it for the
+          // BasicDataSource object so that the driver class could be loaded
+          // from jar file without searching classpath.
+          URL driverJarUrl = new File(driverLocalPath).toURI().toURL();
+          URLClassLoader driverLoader = URLClassLoader.newInstance(
+              new URL[] { driverJarUrl }, getClass().getClassLoader());
+          dbcpDs.setDriverClassLoader(driverLoader);
+          entry = new Entry(dbcpDs, driverLocalPath);
+          cacheMap_.put(cacheKey, entry);
+          return dbcpDs;
+        } catch (Exception e) {
+            throw new JdbcDatabaseAccessException(String.format(
+                "Unable to fetch jdbc driver jar from location '%s'. ", driverUrl));
+          }
       }
     }
   }
