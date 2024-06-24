@@ -28,23 +28,23 @@ API_VERSION 'V1';
 
 DROP TABLE IF EXISTS alltypes_datasource;
 CREATE TABLE alltypes_datasource (
-  id INT,
-  bool_col BOOLEAN,
-  tinyint_col TINYINT,
-  smallint_col SMALLINT,
-  int_col INT,
-  bigint_col BIGINT,
-  float_col FLOAT,
-  double_col DOUBLE,
-  timestamp_col TIMESTAMP,
-  string_col STRING,
-  dec_col1 DECIMAL(9,0),
-  dec_col2 DECIMAL(10,0),
-  dec_col3 DECIMAL(20,10),
-  dec_col4 DECIMAL(38,37),
-  dec_col5 DECIMAL(10,5),
-  date_col DATE)
-PRODUCED BY DATA SOURCE AllTypesDataSource("TestInitString");
+                                     id INT,
+                                     bool_col BOOLEAN,
+                                     tinyint_col TINYINT,
+                                     smallint_col SMALLINT,
+                                     int_col INT,
+                                     bigint_col BIGINT,
+                                     float_col FLOAT,
+                                     double_col DOUBLE,
+                                     timestamp_col TIMESTAMP,
+                                     string_col STRING,
+                                     dec_col1 DECIMAL(9,0),
+                                     dec_col2 DECIMAL(10,0),
+                                     dec_col3 DECIMAL(20,10),
+                                     dec_col4 DECIMAL(38,37),
+                                     dec_col5 DECIMAL(10,5),
+                                     date_col DATE)
+    PRODUCED BY DATA SOURCE AllTypesDataSource("TestInitString");
 
 DROP TABLE IF EXISTS alltypes_jdbc_datasource;
 CREATE EXTERNAL TABLE alltypes_jdbc_datasource (
@@ -109,3 +109,23 @@ TBLPROPERTIES (
 "dbcp.username"="hiveuser",
 "dbcp.password"="password",
 "table"="decimal_tbl");
+
+DROP TABLE IF EXISTS test_strategy;
+CREATE EXTERNAL TABLE IF NOT EXISTS test_strategy (
+  strategy_id INT,
+  name STRING,
+  referrer STRING,
+  landing STRING,
+  priority INT,
+  implementation STRING,
+  last_modified timestamp,
+  PRIMARY KEY (strategy_id) )
+STORED BY JDBC
+TBLPROPERTIES (
+"database.type"="POSTGRES",
+"jdbc.url"="jdbc:postgresql://localhost:5432/functional",
+"jdbc.driver"="org.postgresql.Driver",
+"driver.url"="/test-warehouse/data-sources/jdbc-drivers/postgresql-jdbc.jar",
+"dbcp.username"="hiveuser",
+"dbcp.password"="password",
+"table"="test_strategy");

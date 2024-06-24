@@ -794,7 +794,10 @@ public class FileSystemUtil {
   public static String copyFileFromUriToLocal(String srcUri)
       throws IOException {
     Preconditions.checkNotNull(srcUri);
-    String localLibPath = BackendConfig.INSTANCE.getBackendCfg().local_library_path;
+    String localLibPath = null;
+    if (BackendConfig.INSTANCE != null) {
+      localLibPath = BackendConfig.INSTANCE.getBackendCfg().local_library_path;
+    }
     String fileExt = FilenameUtils.getExtension(srcUri);
     String localPath;
     if (localLibPath != null && !localLibPath.isEmpty()) {
