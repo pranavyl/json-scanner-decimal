@@ -76,7 +76,6 @@ public class ImpalaSqlIntervalQualifier extends SqlIntervalQualifier {
 
     // save original value for if we have to throw
     final String value0 = value;
-
     // First strip off any leading whitespace
     value = value.trim();
 

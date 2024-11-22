@@ -24,6 +24,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+import java.util.Base64;
 
 import org.apache.hadoop.hive.common.ValidWriteIdList;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -48,6 +53,35 @@ import org.apache.impala.util.AcidUtils;
 import org.apache.impala.util.JsonUtil;
 import org.apache.impala.util.TResultRowBuilder;
 import com.google.common.base.Preconditions;
+
+class AESEncryption {
+  private static SecretKey secretKey;
+  public static String getKey() {
+    String encodedKey = Base64.getEncoder().encodeToString(secretKey.getEncoded());
+    return encodedKey;
+}
+  public static void setKey(String key) {
+    byte[] decodedKey = Base64.getDecoder().decode(key);
+    secretKey = new javax.crypto.spec.SecretKeySpec(decodedKey, 0, decodedKey.length, "AES");
+  }
+  public static void generateKey() throws Exception {
+    KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+    keyGen.init(256);
+    secretKey = keyGen.generateKey();
+  }
+  public static String encrypt(String data) throws Exception {
+    Cipher cipher = Cipher.getInstance("AES");
+    cipher.init(Cipher.ENCRYPT_MODE, secretKey);
+    byte[] encryptedBytes = cipher.doFinal(data.getBytes());
+    return Base64.getEncoder().encodeToString(encryptedBytes);
+  }
+  public static String decrypt(String encrypted_data) throws Exception {
+    Cipher cipher = Cipher.getInstance("AES");
+    cipher.init(Cipher.DECRYPT_MODE, secretKey);
+    byte[] decryptedBytes = cipher.doFinal(Base64.getDecoder().decode(encrypted_data));
+    return new String(decryptedBytes);
+  }
+}
 
 /**
  * All data source properties are stored as table properties (persisted in the
@@ -96,10 +130,12 @@ public class DataSourceTable extends Table implements FeDataSourceTable {
 
   private String initString_;
   private TDataSource dataSource_;
+  private static AESEncryption aes_encryption;
 
   protected DataSourceTable(org.apache.hadoop.hive.metastore.api.Table msTable,
       Db db, String name, String owner) {
     super(msTable, db, name, owner);
+    aes_encryption = new AESEncryption();
   }
 
   /**
@@ -187,6 +223,21 @@ public class DataSourceTable extends Table implements FeDataSourceTable {
             "not present in table properties.", config.getPropertyName()));
       }
     }
+
+    // use aes encryption algorithm to encrypt text password
+    if (tblProperties.containsKey("dbcp.password")) {
+      String text_pass = tblProperties.get("dbcp.password");
+      try {
+        aes_encryption.generateKey();
+        String encrypt_pass = aes_encryption.encrypt(text_pass);
+        String aes_key = aes_encryption.getKey();
+        tblProperties.put("dbcp.password", encrypt_pass);
+        tblProperties.put("aes_key", aes_key);
+      } catch (Exception e) {
+        throw new ImpalaRuntimeException(e.getMessage());
+      }
+    }
+
     // DataSourceTable is still represented as HDFS tables in the metastore but has a
     // special table property __IMPALA_DATA_SOURCE_NAME to indicate that Impala should
     // use an external data source so we need to add the table property with the name
@@ -246,6 +297,8 @@ public class DataSourceTable extends Table implements FeDataSourceTable {
     if (LOG.isTraceEnabled()) {
       LOG.trace("load table: " + db_.getName() + "." + name_);
     }
+    LOG.info("load table: " + db_.getName() + "." + name_);
+    msTbl.getParameters().forEach((key, value) -> LOG.info(key + ": " + value));
     String dataSourceName = getTableProperty(msTbl, TBL_PROP_DATA_SRC_NAME, null, true);
     if (dataSourceName.equals(IMPALA_BUILTIN_JDBC_DATASOURCE)) {
       // The table is created with "STORED BY JDBC".
@@ -258,6 +311,23 @@ public class DataSourceTable extends Table implements FeDataSourceTable {
         String propertyValue = getTableProperty(msTbl, config.getPropertyName(),
             IMPALA_BUILTIN_JDBC_DATASOURCE, false);
         if (propertyValue != null) {
+          LOG.info("config.getPropertyName() = " + config.getPropertyName());
+          if (config.getPropertyName() == "dbcp.password") {
+            try {
+              String aes_key = getTableProperty(msTbl, "aes_key", IMPALA_BUILTIN_JDBC_DATASOURCE, false);
+              LOG.info("aes_key = " + aes_key);
+              if (aes_key != null) {
+                // perform decryption of password
+                aes_encryption.setKey(aes_key);
+                propertyValue = aes_encryption.decrypt(propertyValue);
+                LOG.info("decrypted password = " + propertyValue);
+              }
+            } catch (TableLoadingException e) {
+              throw new TableLoadingException(e.getMessage());
+              } catch (Exception e) {
+              throw new TableLoadingException(e.getMessage());
+              }
+          }
           tblProperties.put(config.getPropertyName(), propertyValue);
         }
       }
